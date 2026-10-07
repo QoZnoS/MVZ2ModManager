@@ -24,9 +24,9 @@ internal sealed class ConfigPanel : UserControl
         DoubleBuffered = true;
 
         _toolbar = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 0, 8, 6) };
-        _saveBtn     = MakeBtn("Save");
-        _reloadBtn   = MakeBtn("↺ Reload");
-        _resetAllBtn = MakeBtn("Reset All to Default");
+        _saveBtn     = MakeBtn("保存");
+        _reloadBtn   = MakeBtn("↺ 重新载入");
+        _resetAllBtn = MakeBtn("全部恢复默认");
         _saveBtn.Enabled = false;
         _saveBtn.Click     += (_, __) => DoSave();
         _reloadBtn.Click   += (_, __) => Refresh_();
@@ -45,7 +45,7 @@ internal sealed class ConfigPanel : UserControl
         _titleLabel = new Label
         {
             Dock = DockStyle.Top, Height = 30, Text = "",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold), Padding = new Padding(4, 4, 0, 0),
+            Font = ThemeEngine.MakeFont(12f, FontStyle.Bold), Padding = new Padding(4, 4, 0, 0),
         };
 
         _contentHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(12, 4, 12, 12) };
@@ -76,7 +76,7 @@ internal sealed class ConfigPanel : UserControl
 
     public void Refresh_()
     {
-        if (AppState.GameDir == null) { _statusLabel.Text = "No game selected."; return; }
+        if (AppState.GameDir == null) { _statusLabel.Text = "未选择游戏。"; return; }
 
         string? keepPath = _current?.FilePath;
         _files = BepInExConfig.ListConfigFiles();
@@ -86,7 +86,7 @@ internal sealed class ConfigPanel : UserControl
         foreach (var f in _files) _fileList.Items.Add(f.DisplayName);
         _fileList.EndUpdate();
 
-        _statusLabel.Text = $"{_files.Count} config files";
+        _statusLabel.Text = $"{_files.Count} 个配置文件";
         _resetAllBtn.Enabled = _files.Count > 0;
 
         int idx = keepPath != null ? _files.FindIndex(f => f.FilePath == keepPath) : -1;
@@ -99,8 +99,8 @@ internal sealed class ConfigPanel : UserControl
         if (_files.Count == 0) return;
 
         var confirm = MessageBox.Show(
-            $"This resets every setting across all {_files.Count} config files back to its default value. This cannot be undone.\n\nContinue?",
-            "Reset All to Default", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            $"这会把全部 {_files.Count} 个配置文件里的所有设置都恢复成默认值，且无法撤销。\n\n要继续吗？",
+            "全部恢复默认", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (confirm != DialogResult.Yes) return;
 
         int changed = 0;
@@ -117,7 +117,7 @@ internal sealed class ConfigPanel : UserControl
         }
 
         Refresh_();
-        _statusLabel.Text = $"Reset {changed} setting(s) to default across {_files.Count} config files.";
+        _statusLabel.Text = $"已在 {_files.Count} 个配置文件里把 {changed} 项设置恢复为默认值。";
     }
 
     private void ShowSelectedFile()
@@ -136,9 +136,9 @@ internal sealed class ConfigPanel : UserControl
                 var theme = ThemeEngine.Current;
                 var msg = new Label
                 {
-                    Text = "No configs found, maybe try installing some mods and starting your game!",
+                    Text = "没有找到配置文件，先装几个模组、启动一次游戏试试！",
                     Dock = DockStyle.Top, AutoSize = false, Height = 60,
-                    Font = new Font("Segoe UI", 10f), Padding = new Padding(4, 8, 4, 0),
+                    Font = ThemeEngine.MakeFont(10f), Padding = new Padding(4, 8, 4, 0),
                     ForeColor = theme.SubText, BackColor = theme.SurfaceAlt,
                 };
                 _contentHost.Controls.Add(msg);
@@ -155,7 +155,7 @@ internal sealed class ConfigPanel : UserControl
         }
         catch (Exception ex)
         {
-            _statusLabel.Text = "Failed to parse config: " + ex.Message;
+            _statusLabel.Text = "解析配置失败：" + ex.Message;
             return;
         }
 
@@ -185,7 +185,7 @@ internal sealed class ConfigPanel : UserControl
         var title = new Label
         {
             Text = section.Name, Dock = DockStyle.Top, Height = SectionTitleHeight,
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold), Padding = new Padding(0, 6, 0, 0),
+            Font = ThemeEngine.MakeFont(10f, FontStyle.Bold), Padding = new Padding(0, 6, 0, 0),
             ForeColor = t.Text, BackColor = t.SurfaceAlt,
         };
         group.Controls.Add(title);
@@ -200,15 +200,15 @@ internal sealed class ConfigPanel : UserControl
         var label = new Label
         {
             Text = entry.Key, Dock = DockStyle.Top, Height = 18, AutoSize = false,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = t.Text, BackColor = t.SurfaceAlt,
+            Font = ThemeEngine.MakeFont(9.5f, FontStyle.Bold), ForeColor = t.Text, BackColor = t.SurfaceAlt,
         };
         string? desc = entry.Description.Count > 0 ? string.Join(" ", entry.Description) : null;
         bool changedFromDefault = entry.DefaultValue != null && !entry.Value.Equals(entry.DefaultValue, StringComparison.OrdinalIgnoreCase);
-        if (changedFromDefault) label.Text += "  (changed)";
+        if (changedFromDefault) label.Text += "  （已修改）";
 
         string? tooltipText = desc;
         if (entry.DefaultValue != null)
-            tooltipText = (tooltipText != null ? tooltipText + "\n\n" : "") + $"Default: {entry.DefaultValue}";
+            tooltipText = (tooltipText != null ? tooltipText + "\n\n" : "") + $"默认值：{entry.DefaultValue}";
         if (tooltipText != null) new ToolTip().SetToolTip(label, tooltipText);
 
         row.Controls.Add(BuildWidget(entry, t));
@@ -302,9 +302,9 @@ internal sealed class ConfigPanel : UserControl
         try
         {
             BepInExConfig.Save(_current);
-            _statusLabel.Text = $"Saved {_current.DisplayName}.";
+            _statusLabel.Text = $"已保存 {_current.DisplayName}。";
         }
-        catch (Exception ex) { _statusLabel.Text = "Save failed: " + ex.Message; }
+        catch (Exception ex) { _statusLabel.Text = "保存失败：" + ex.Message; }
     }
 
     private void ApplyTheme()

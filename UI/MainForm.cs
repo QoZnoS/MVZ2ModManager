@@ -24,11 +24,12 @@ internal sealed class MainForm : Form
     private const int WindowRadius = 14;
     private const int TabRadius = 8;
 
-    private static readonly string[] NavLabels = { "Installed", "Loadouts", "Config", "Logs", "Settings" };
+    private static readonly string[] NavLabels = { "已安装", "快照点", "模组包", "配置", "日志", "设置" };
 
     private const int IndexInstalled = 0;
-    private const int IndexLogs = 3;
-    private const int IndexSettings = 4;
+    private const int IndexModpacks = 2;
+    private const int IndexLogs = 4;
+    private const int IndexSettings = 5;
 
     // ---- 标题栏 ----
     private readonly Panel _titleBar;
@@ -55,11 +56,15 @@ internal sealed class MainForm : Form
     // ---- 面板 ----
     private readonly InstalledPanel _installedPanel;
     private readonly LoadoutsPanel _loadoutsPanel;
+    private readonly ModpacksPanel _modpacksPanel;
     private readonly ConfigPanel _configPanel;
     private readonly LogsPanel _logsPanel;
     private readonly SettingsPanel _settingsPanel;
     private readonly Control[] _navPanels;
     private readonly Action?[] _navActivate;
+
+    private readonly string? _pendingPackPath;
+    private TutorialOverlay? _tutorial;
 
     // ---- 状态栏 ----
     private readonly Panel _statusBar;
@@ -69,8 +74,10 @@ internal sealed class MainForm : Form
     private Point _dragStart;
     private bool _dragging;
 
-    public MainForm()
+    public MainForm(string? pendingPackPath = null)
     {
+        _pendingPackPath = pendingPackPath;
+
         Icon = AppIcons.Icon;
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(1100, 720);
@@ -81,15 +88,17 @@ internal sealed class MainForm : Form
 
         _installedPanel = new InstalledPanel { Visible = true };
         _loadoutsPanel = new LoadoutsPanel { Visible = false };
+        _modpacksPanel = new ModpacksPanel { Visible = false };
         _configPanel = new ConfigPanel { Visible = false };
         _logsPanel = new LogsPanel { Visible = false };
         _settingsPanel = new SettingsPanel { Visible = false };
 
-        _navPanels = new Control[] { _installedPanel, _loadoutsPanel, _configPanel, _logsPanel, _settingsPanel };
+        _navPanels = new Control[] { _installedPanel, _loadoutsPanel, _modpacksPanel, _configPanel, _logsPanel, _settingsPanel };
         _navActivate = new Action?[]
         {
             () => _installedPanel.Refresh_(),
             () => _loadoutsPanel.Refresh_(),
+            () => _modpacksPanel.Refresh_(),
             () => _configPanel.Refresh_(),
             () => _logsPanel.Refresh_(),
             () => _settingsPanel.Reload(),
@@ -104,7 +113,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill, AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 8f),
+            Font = ThemeEngine.MakeFont(8f),
         };
         _resizeHandle = MakeResizeHandle();
         _statusBar.Controls.Add(_statusLabel);
@@ -147,7 +156,7 @@ internal sealed class MainForm : Form
             Text = "MVZ2 Mod Manager",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font("Segoe UI", 10f),
+            Font = ThemeEngine.MakeFont(10f),
         };
         _titleLabel.MouseDown += TitleBar_MouseDown;
         _titleLabel.MouseMove += TitleBar_MouseMove;
@@ -165,7 +174,7 @@ internal sealed class MainForm : Form
             Text = "",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleRight,
-            Font = new Font("Segoe UI", 8.5f),
+            Font = ThemeEngine.MakeFont(8.5f),
             Padding = new Padding(0, 0, 8, 0),
             Cursor = Cursors.Hand,
             AutoEllipsis = true,
@@ -237,6 +246,16 @@ internal sealed class MainForm : Form
             _navActivate[0]?.Invoke();
             UpdateStatusBar();
             ApplyRoundedRegion();
+
+            // 双击 .mvz2pack 启动时：直接落到模组包页并问要不要还原。
+            if (_pendingPackPath is { Length: > 0 } pack && File.Exists(pack))
+            {
+                SwitchToIndex(IndexModpacks);
+                _modpacksPanel.ImportAndPrompt(pack);
+                return;
+            }
+
+            if (!AppState.Settings.HasSeenTutorial) StartTutorial();
         };
         Resize += (_, __) => ApplyRoundedRegion();
         SizeChanged += (_, __) => ApplyRoundedRegion();
@@ -255,7 +274,28 @@ internal sealed class MainForm : Form
 
     internal InstalledPanel InstalledPanelControl => _installedPanel;
 
+    /// <summary>标签页名字。自检直接用它，避免自检里另抄一份、抄错了还当成通过。</summary>
+    internal static string[] TabLabels => NavLabels;
+
+    /// <summary>当前选中的标签页序号。</summary>
+    internal int ActiveTabIndex => _activeNavIndex;
+
     internal bool GameIsRunning => _gameRunning;
+
+    /// <summary>打开（或重开）首次使用引导。</summary>
+    internal void StartTutorial()
+    {
+        _tutorial?.Dispose();
+        _tutorial = new TutorialOverlay(this);
+        _tutorial.Start();
+    }
+
+    /// <summary>自检用：把引导的每一步渲染一遍（会真的切标签页）然后收摊。</summary>
+    internal void StopTutorialForTest()
+    {
+        _tutorial?.StepThroughAllForTest();
+        _tutorial = null;
+    }
 
     // ------------------------------------------------------------ 状态栏
 
@@ -263,7 +303,7 @@ internal sealed class MainForm : Form
     internal void UpdateStatusBar()
     {
         var gameDir = AppState.GameDir;
-        if (gameDir == null) { _statusLabel.Text = "No game selected."; return; }
+        if (gameDir == null) { _statusLabel.Text = "未选择游戏。"; return; }
 
         var mods = ModInstaller.GetInstalled();
         int enabled = mods.Count(m => m.Enabled);
@@ -271,15 +311,15 @@ internal sealed class MainForm : Form
 
         var parts = new List<string>
         {
-            $"{enabled} enabled",
-            $"{disabled} disabled",
+            $"{enabled} 已启用",
+            $"{disabled} 已禁用",
         };
 
         if (!BepInExManager.ModsEnabled(gameDir))
-            parts.Add("⚠ BepInEx is OFF (winhttp.dll renamed) — no mods will load");
+            parts.Add("⚠ BepInEx 已关闭（winhttp.dll 已改名）— 不会加载任何模组");
 
         if (_gameRunning)
-            parts.Add("⚠ game is running — plugin DLLs are locked");
+            parts.Add("⚠ 游戏正在运行 — 插件 DLL 被占用");
 
         _statusLabel.Text = string.Join("  ·  ", parts);
     }
@@ -305,7 +345,7 @@ internal sealed class MainForm : Form
         foreach (var b in _navButtons)
         {
             bool active = b == _navButtons[idx];
-            b.Font = new Font("Segoe UI", 9.5f, active ? FontStyle.Bold : FontStyle.Regular);
+            b.Font = ThemeEngine.MakeFont(9.5f, active ? FontStyle.Bold : FontStyle.Regular);
         }
 
         _targetX = _navButtons[idx].Bounds.Left + 6;
@@ -358,7 +398,7 @@ internal sealed class MainForm : Form
     {
         _gameLabel.Text = AppState.Settings.GamePath.Length > 0
             ? Path.GetDirectoryName(AppState.Settings.GamePath) ?? AppState.Settings.GameName
-            : "No game selected";
+            : "未选择游戏";
 
         bool hasGame = AppState.Settings.GamePath.Length > 0;
         _titleIconBox.Visible = hasGame;
@@ -370,7 +410,7 @@ internal sealed class MainForm : Form
     {
         if (_gameRunning)
         {
-            MessageBox.Show(this, "Close the game first.", "Game is running",
+            MessageBox.Show(this, "请先关闭游戏。", "游戏正在运行",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -390,8 +430,8 @@ internal sealed class MainForm : Form
     {
         var btn = new RButton
         {
-            Text = "▶ Play", CornerRadius = 8,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Text = "▶ 启动游戏", CornerRadius = 8,
+            Font = ThemeEngine.MakeFont(9f, FontStyle.Bold),
             Cursor = Cursors.Hand, Style = RButtonStyle.Solid,
         };
         btn.Click += (_, __) => OnPlayClick();
@@ -417,23 +457,23 @@ internal sealed class MainForm : Form
         if (!BepInExManager.ModsEnabled(gameDir))
         {
             string question = BepInExManager.HasDisabledMarker(gameDir)
-                ? "BepInEx is currently switched OFF (winhttp.dll.disabled).\n\nTurn it back on and launch?"
-                : "winhttp.dll was not found, so BepInEx won't load any mods.\n\nLaunch the game anyway?";
+                ? "BepInEx 目前处于关闭状态（winhttp.dll.disabled）。\n\n要重新打开并启动游戏吗？"
+                : "没有找到 winhttp.dll，BepInEx 不会加载任何模组。\n\n仍然启动游戏吗？";
 
             if (BepInExManager.HasDisabledMarker(gameDir))
             {
-                if (MessageBox.Show(this, question, "BepInEx is off",
+                if (MessageBox.Show(this, question, "BepInEx 已关闭",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                     return;
                 try { BepInExManager.ToggleMods(gameDir); }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(this, "Couldn't re-enable BepInEx: " + ex.Message, "Error",
+                    MessageBox.Show(this, "重新启用 BepInEx 失败：" + ex.Message, "错误",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
             }
-            else if (MessageBox.Show(this, question, "BepInEx missing",
+            else if (MessageBox.Show(this, question, "缺少 BepInEx",
                          MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 return;
@@ -457,7 +497,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Couldn't launch the game: " + ex.Message, "Error",
+            MessageBox.Show(this, "启动游戏失败：" + ex.Message, "错误",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -492,8 +532,8 @@ internal sealed class MainForm : Form
         if (!running && _gameRunning && _launchedAt is { } launched && DateTime.UtcNow - launched < TimeSpan.FromSeconds(10))
         {
             var check = MessageBox.Show(this,
-                $"The game closed a few seconds after launching — it probably crashed.\n\nOpen the log?",
-                "Game closed quickly", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                "游戏启动后几秒就退出了 — 很可能崩溃了。\n\n要打开日志看看吗？",
+                "游戏很快退出", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (check == DialogResult.Yes) SwitchToIndex(IndexLogs);
         }
         _launchedAt = null;
@@ -518,7 +558,7 @@ internal sealed class MainForm : Form
                    : _gameRunning ? Color.FromArgb(220, 60, 60)
                    : Color.FromArgb(60, 190, 100);
 
-        _playBtn.Text = _starting ? "Starting..." : _gameRunning ? "■ Stop" : "▶ Play";
+        _playBtn.Text = _starting ? "启动中…" : _gameRunning ? "■ 停止" : "▶ 启动游戏";
         _playBtn.Style = RButtonStyle.Solid;
         _playBtn.FillColor = RoundedGraphics.Lerp(t.SurfaceAlt, tint, 0.3f);
         _playBtn.HoverFillColor = RoundedGraphics.Lerp(t.SurfaceAlt, tint, 0.45f);
@@ -539,12 +579,12 @@ internal sealed class MainForm : Form
     private void MainForm_DragDrop(object? sender, DragEventArgs e)
     {
         if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files) return;
-        if (AppState.GameDir == null) { SetStatus("No game selected, can't install."); return; }
+        if (AppState.GameDir == null) { SetStatus("未选择游戏，无法安装。"); return; }
 
         if (_gameRunning)
         {
-            MessageBox.Show(this, "Close the game first — plugin DLLs are locked while it runs.",
-                "Game is running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "请先关闭游戏 — 游戏运行时插件 DLL 会被占用。",
+                "游戏正在运行", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -556,7 +596,7 @@ internal sealed class MainForm : Form
 
         if (count == 0) return;
 
-        SetStatus($"Installed {count} dropped .dll file{(count == 1 ? "" : "s")}.");
+        SetStatus($"已安装 {count} 个拖入的 .dll 文件。");
         _installedPanel.Refresh_();
         UpdateStatusBar();
     }
@@ -604,7 +644,7 @@ internal sealed class MainForm : Form
     {
         Text = text, Style = RButtonStyle.Ghost,
         AutoSize = false, Width = 92, Height = 32,
-        Font = new Font("Segoe UI", 9.5f), Cursor = Cursors.Hand,
+        Font = ThemeEngine.MakeFont(9.5f), Cursor = Cursors.Hand,
         CornerRadius = TabRadius,
         Margin = new Padding(0),
     };
@@ -726,6 +766,7 @@ internal sealed class MainForm : Form
             ThemeEngine.ThemeChanged -= ApplyTheme;
             _gameRunningTimer?.Dispose();
             _underlineTimer?.Dispose();
+            _tutorial?.Dispose();
         }
         base.Dispose(disposing);
     }

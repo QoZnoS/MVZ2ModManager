@@ -8,6 +8,13 @@
 #                                免安装版（自包含单文件，约 63MB，目标机器不用装 .NET）
 #   .\build.ps1 -Run             构建后启动
 #   .\build.ps1 -SelfTest        构建后跑无界面自检（写 _selftest.txt）
+#   .\build.ps1 -SelfTest -ApplyRoundtrip
+#                                自检再加上"模组包还原往返"，会在**临时合成的游戏目录**上
+#                                真的跑一遍破坏性路径（清理根目录 / 恢复文件），不碰真实安装
+#   .\build.ps1 -UiSelfTest      界面自检：把所有窗体/面板都构造出来并切一遍标签页，
+#                                然后退出（写 _ui-selftest.txt），不需要人盯着看
+#   .\build.ps1 -Screenshot      每个标签页画一张 PNG + 控件树到 screenshots\，
+#                                用来核对版面（文字偏下 / 超宽溢出 / 列宽漂移）
 #   .\build.ps1 -Clean           先删 bin/ obj/
 #
 # 注：直接运行 .ps1 若被 ExecutionPolicy 挡住（仓库根的 build.ps1 也一样），用
@@ -24,6 +31,9 @@ param(
     [switch]$SelfContained,
     [switch]$Run,
     [switch]$SelfTest,
+    [switch]$ApplyRoundtrip,
+    [switch]$UiSelfTest,
+    [switch]$Screenshot,
     [switch]$Clean
 )
 $ErrorActionPreference = 'Stop'
@@ -63,10 +73,29 @@ if (-not (Test-Path -LiteralPath $exe)) { throw ("构建产物缺失：" + $exe)
 if ($SelfTest) {
     Write-Step "自检"
     $report = Join-Path $here '_selftest.txt'
-    & $exe --selftest $report
-    $code = $LASTEXITCODE
+    $args = @('--selftest', $report)
+    if ($ApplyRoundtrip) { $args += '--apply-roundtrip' }
+    # 这是 GUI 子系统程序：PowerShell 的 & 不会等它，$LASTEXITCODE 会是上一次的残留值。
+    $proc = Start-Process -FilePath $exe -ArgumentList $args -PassThru -Wait
     Write-Info ("报告：" + $report)
-    if ($code -ne 0) { Write-Host "自检未全部通过。" -ForegroundColor Yellow } else { Write-Ok "自检全部通过" }
+    if ($proc.ExitCode -ne 0) { Write-Host "自检未全部通过。" -ForegroundColor Yellow } else { Write-Ok "自检全部通过" }
+}
+
+if ($UiSelfTest) {
+    Write-Step "界面自检"
+    $report = Join-Path $here '_ui-selftest.txt'
+    # 同样必须用 Start-Process -Wait：GUI 子系统 + & 的组合不会等进程。
+    $proc = Start-Process -FilePath $exe -ArgumentList @('--ui-selftest', $report) -PassThru -Wait
+    Write-Info ("报告：" + $report)
+    if ($proc.ExitCode -ne 0) { Write-Host "界面自检未全部通过。" -ForegroundColor Yellow } else { Write-Ok "界面自检全部通过" }
+}
+
+if ($Screenshot) {
+    Write-Step "界面截图"
+    $shotDir = Join-Path $here 'screenshots'
+    $proc = Start-Process -FilePath $exe -ArgumentList @('--screenshot', $shotDir) -PassThru -Wait
+    Write-Info ("输出目录：" + $shotDir)
+    if ($proc.ExitCode -ne 0) { Write-Host "截图失败。" -ForegroundColor Yellow } else { Write-Ok "截图完成" }
 }
 
 if ($Pack) {

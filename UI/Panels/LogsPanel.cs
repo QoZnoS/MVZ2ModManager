@@ -50,7 +50,7 @@ internal sealed class LogsPanel : UserControl
         _culpritLabel = new Label
         {
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Font = ThemeEngine.MakeFont(9.5f, FontStyle.Bold),
         };
         _culpritBanner.Controls.Add(_culpritDismissBtn);
         _culpritBanner.Controls.Add(_culpritLabel);
@@ -63,21 +63,21 @@ internal sealed class LogsPanel : UserControl
 
         _sessionDropdown = new RDropdown { Width = 180, Height = 30, CornerRadius = 8, Margin = new Padding(0, 0, 8, 8) };
 
-        _searchBox = new RTextBox { Width = 200, Height = 30, CornerRadius = 8, PlaceholderText = "Search log...", Margin = new Padding(0, 0, 8, 8) };
+        _searchBox = new RTextBox { Width = 200, Height = 30, CornerRadius = 8, PlaceholderText = "搜索日志…", Margin = new Padding(0, 0, 8, 8) };
         _searchBox.TextChanged += (_, __) => RenderAll();
 
         _severityDropdown = new RDropdown { Width = 150, Height = 30, CornerRadius = 8, Margin = new Padding(0, 0, 8, 8) };
-        _severityDropdown.Items.Add("All lines");
-        _severityDropdown.Items.Add("Errors only");
-        _severityDropdown.Items.Add("Warnings only");
-        _severityDropdown.Items.Add("Errors + Warnings");
+        _severityDropdown.Items.Add("全部行");
+        _severityDropdown.Items.Add("仅错误");
+        _severityDropdown.Items.Add("仅警告");
+        _severityDropdown.Items.Add("错误 + 警告");
         _severityDropdown.SelectedIndex = 0;
         _severityDropdown.SelectedIndexChanged += (_, __) => RenderAll();
 
-        _exportBugReportBtn = new RButton { Text = "Export Bug Report", CornerRadius = 8, AutoSize = true, Padding = new Padding(10, 3, 10, 3), Margin = new Padding(0, 0, 8, 8) };
+        _exportBugReportBtn = new RButton { Text = "导出问题报告", CornerRadius = 8, AutoSize = true, Padding = new Padding(10, 3, 10, 3), Margin = new Padding(0, 0, 8, 8) };
         _exportBugReportBtn.Click += (_, __) => ExportBugReport();
 
-        _clearBtn = new RButton { Text = "Clear", CornerRadius = 8, AutoSize = true, Padding = new Padding(10, 3, 10, 3), Margin = new Padding(0, 0, 0, 8) };
+        _clearBtn = new RButton { Text = "清空", CornerRadius = 8, AutoSize = true, Padding = new Padding(10, 3, 10, 3), Margin = new Padding(0, 0, 0, 8) };
         _clearBtn.Click += (_, __) =>
         {
             if (_viewingLive) _liveClearIndex = _liveLines.Count;
@@ -151,8 +151,8 @@ internal sealed class LogsPanel : UserControl
         if (_sessionDropdown.SelectedIndex != 0) _sessionDropdown.SelectedIndex = 0;
         else { _viewingLive = true; RenderAll(); }
 
-        AddLine($"{AppState.Settings.GameName} is running, watching its log file.");
-        AddLine(_currentLogPath != null ? $"Log path: {_currentLogPath}" : "Couldn't figure out where this game's log file should be.");
+        AddLine($"{AppState.Settings.GameName} 正在运行，正在跟随它的日志文件。");
+        AddLine(_currentLogPath != null ? $"日志路径：{_currentLogPath}" : "没能推断出这个游戏的日志文件应该在哪里。");
         AddLine("");
         PollLog();
     }
@@ -160,7 +160,7 @@ internal sealed class LogsPanel : UserControl
     private void OnGameStopped()
     {
         AddLine("");
-        AddLine("Game closed.");
+        AddLine("游戏已关闭。");
         UpdateCulpritBanner(_liveLines);
         LogHistoryManager.ArchiveSession(_sessionStartedAt, _liveLines);
         RefreshSessionDropdown(preserveSelection: true);
@@ -177,7 +177,7 @@ internal sealed class LogsPanel : UserControl
             {
                 if (!_reportedMissingLog)
                 {
-                    AddLine($"Still waiting for {Path.GetFileName(_currentLogPath)} to show up. The loader creates it once the game finishes starting up.");
+                    AddLine($"仍在等待 {Path.GetFileName(_currentLogPath)} 出现。加载器会在游戏启动完成后创建它。");
                     _reportedMissingLog = true;
                 }
                 return;
@@ -192,7 +192,7 @@ internal sealed class LogsPanel : UserControl
             {
                 if (!_reportedOpenError)
                 {
-                    AddLine($"Couldn't open the log file: {ex.Message}");
+                    AddLine($"打开日志文件失败：{ex.Message}");
                     _reportedOpenError = true;
                 }
                 return;
@@ -223,7 +223,7 @@ internal sealed class LogsPanel : UserControl
         _viewingLive = true;
         RenderAll();
         if (_logBox.TextLength == 0 && !IsGameRunning())
-            AppendStyledLine($"No game running right now, so there's nothing to show. Launch {AppState.Settings.GameName} and this tab will start following its log live.");
+            AppendStyledLine($"当前没有游戏在运行，所以没有内容可显示。启动 {AppState.Settings.GameName} 后，这个标签页就会实时跟随它的日志。");
         UpdateCulpritBanner(_liveLines);
     }
 
@@ -232,7 +232,7 @@ internal sealed class LogsPanel : UserControl
         _viewingLive = false;
         _archivedClearIndex = 0;
         try { _archivedLines = File.ReadAllLines(session.FilePath).ToList(); }
-        catch { _archivedLines = new List<string> { "(couldn't read this session's log file)" }; }
+        catch { _archivedLines = new List<string> { "（无法读取本次会话的日志文件）" }; }
         RenderAll();
         UpdateCulpritBanner(_archivedLines);
     }
@@ -245,7 +245,7 @@ internal sealed class LogsPanel : UserControl
 
         _sessions = LogHistoryManager.ListSessions();
         _sessionDropdown.Items.Clear();
-        _sessionDropdown.Items.Add("Live");
+        _sessionDropdown.Items.Add("本次会话");
         foreach (var s in _sessions) _sessionDropdown.Items.Add(s.DisplayName);
 
         int targetIndex = keepText != null ? _sessionDropdown.Items.IndexOf(keepText) : 0;
@@ -315,7 +315,7 @@ internal sealed class LogsPanel : UserControl
     {
         var suspect = CrashAnalyzer.Analyze(lines);
         if (suspect == null) { _culpritBanner.Visible = false; return; }
-        _culpritLabel.Text = $"⚠ Possible culprit: {suspect.ModName}. {suspect.Reason}";
+        _culpritLabel.Text = $"⚠ 可疑元凶：{suspect.ModName}。{suspect.Reason}";
         _culpritBanner.Visible = true;
     }
 
@@ -323,8 +323,8 @@ internal sealed class LogsPanel : UserControl
     {
         using var dlg = new SaveFileDialog
         {
-            Title = "Export Bug Report",
-            Filter = "Zip Archive|*.zip",
+            Title = "导出问题报告",
+            Filter = "Zip 压缩包|*.zip",
             FileName = $"MVZ2ModManager-BugReport-{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.zip",
             InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
         };
@@ -333,11 +333,11 @@ internal sealed class LogsPanel : UserControl
         try
         {
             BugReportManager.Export(dlg.FileName, ActiveLines());
-            MessageBox.Show($"Bug report saved to:\n{dlg.FileName}", "Bug Report", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"问题报告已保存到：\n{dlg.FileName}", "问题报告", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("Failed to export bug report: " + ex.Message, "Bug Report", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("导出问题报告失败：" + ex.Message, "问题报告", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 

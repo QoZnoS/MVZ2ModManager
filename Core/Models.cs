@@ -53,10 +53,16 @@ internal class ModLoadout
 
 internal class ModpackManifest
 {
+    /// <summary>当前清单格式版本。将来改结构时靠它判断要不要迁移。</summary>
+    public const int CurrentFormat = 1;
+
+    public int FormatVersion { get; set; } = CurrentFormat;
     public string Name { get; set; } = "";
     public string Author { get; set; } = "";
     public string GameSlug { get; set; } = "";
     public DateTime CreatedUtc { get; set; }
+
+    /// <summary>打包时**启用中**的模组名（这套包代表的 setup）。</summary>
     public List<string> Mods { get; set; } = new();
 }
 
@@ -83,6 +89,17 @@ internal class AppSettings
 
     /// <summary>游戏选择器里怎么显示游戏（文字 / 图标 / 都要）。</summary>
     public GamePickerDisplay GamePickerDisplay = GamePickerDisplay.Both;
+
+    /// <summary>首次使用引导是否已经看过。</summary>
+    public bool HasSeenTutorial;
+
+    /// <summary>
+    /// 禁用/卸载模组前是否提醒"会让哪些关卡存档读不进去"。
+    ///
+    /// <para>关掉之后**不再扫描存档**（省掉一次磁盘 I/O），也不再拦截；
+    /// 依赖关系的拦截不受影响。</para>
+    /// </summary>
+    public bool WarnAboutSaveRisk = true;
 
     /// <summary>游戏名 → 主程序路径（用过一次就记住）。</summary>
     public Dictionary<string, string> KnownGamePaths = new();

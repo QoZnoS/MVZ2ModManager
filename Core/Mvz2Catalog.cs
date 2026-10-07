@@ -26,11 +26,11 @@ internal static class Mvz2Catalog
     public static readonly Mvz2ModFact[] Known =
     [
         new("qoznos.mvz2.core",         null,            "DSHCore"),
-        new("qoznos.mvz2.labmod",       "mvz2_lab",      "MVZ2 Laboratory Content"),
-        new("qoznos.mvz2.modularcurse", "modular_curse", "MVZ2 Modular Curse"),
-        new("qoznos.mvz2.loadout",      "loadout",       "MVZ2 Loadout"),
-        new("qoznos.mvz2.uigallery",    "uig",           "MVZ2 UI Gallery"),
-        new("qoznos.mvz2.replay",       null,            "MVZ2 Replay"),
+        new("qoznos.mvz2.labmod",       "mvz2_lab",      "MVZ2 实验室内容"),
+        new("qoznos.mvz2.modularcurse", "modular_curse", "MVZ2 模块化诅咒"),
+        new("qoznos.mvz2.loadout",      "loadout",       "MVZ2 配装系统"),
+        new("qoznos.mvz2.uigallery",    "uig",           "MVZ2 UI 图鉴"),
+        new("qoznos.mvz2.replay",       null,            "MVZ2 录像回放"),
     ];
 
     /// <summary>DLL / 目录名 → 命名空间。GUID 对不上时兜底用（改了 GUID 也还能认出命名空间）。</summary>

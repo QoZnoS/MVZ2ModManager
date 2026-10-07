@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using MVZ2ModManager.Theme;
 
 namespace MVZ2ModManager.UI.Controls;
 
@@ -42,7 +43,7 @@ internal sealed class RDropdown : Control
         BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
         Size = new Size(130, 30);
-        Font = new Font("Segoe UI", 9.5f);
+        Font = ThemeEngine.MakeFont(9.5f);
 
         _timer = new System.Windows.Forms.Timer { Interval = 15 };
         _timer.Tick += (_, __) => StepAnimation();

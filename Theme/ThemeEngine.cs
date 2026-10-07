@@ -32,6 +32,38 @@ internal static class ThemeEngine
     public static ThemeColors Current { get; private set; } = Black();
     public static event Action? ThemeChanged;
 
+    private static string? _uiFamily;
+
+    /// <summary>
+    /// UI 用的字体族。界面文案是中文，所以必须挑一个**真的带中日韩字形**的字体 ——
+    /// 直接用 "Segoe UI" 在部分机器上会由 GDI+ 的字体链接兜底，但兜底结果不稳定
+    /// （可能出方块或字形忽大忽小）。这里按优先级探测，探测失败才回退。
+    /// </summary>
+    public static string UiFontFamily => _uiFamily ??= ResolveUiFontFamily();
+
+    /// <summary>新建一个 UI 字体。返回的对象归调用方所有（该 Dispose 的就 Dispose）。</summary>
+    public static Font MakeFont(float size, FontStyle style = FontStyle.Regular)
+        => new(UiFontFamily, size, style);
+
+    private static string ResolveUiFontFamily()
+    {
+        string[] preferred = ["Microsoft YaHei UI", "Microsoft YaHei", "Microsoft JhengHei UI", "SimHei", "Segoe UI", "Tahoma"];
+
+        try
+        {
+            var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in FontFamily.Families) installed.Add(f.Name);
+            foreach (var name in preferred)
+                if (installed.Contains(name)) return name;
+        }
+        catch
+        {
+            // 枚举字体失败不该让程序起不来，交回默认值即可。
+        }
+
+        return "Segoe UI";
+    }
+
     public static void Apply(Core.ThemeMode mode, string? customBg = null, string? customAccent = null)
     {
         Current = mode switch

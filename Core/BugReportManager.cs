@@ -31,20 +31,20 @@ internal static class BugReportManager
     private static string BuildSystemInfo()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("MVZ2 Mod Manager Bug Report");
-        sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine($"App build: {Program.CurrentVersion}");
-        sb.AppendLine($"OS: {Environment.OSVersion}");
-        sb.AppendLine($".NET runtime: {Environment.Version}");
-        sb.AppendLine($"64-bit OS: {Environment.Is64BitOperatingSystem}");
-        sb.AppendLine($"Game: {AppState.Settings.GameName}");
-        sb.AppendLine($"Game path: {AppState.Settings.GamePath}");
+        sb.AppendLine("MVZ2 Mod Manager 问题报告");
+        sb.AppendLine($"生成时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"程序版本：{Program.VersionString}");
+        sb.AppendLine($"操作系统：{Environment.OSVersion}");
+        sb.AppendLine($".NET 运行时：{Environment.Version}");
+        sb.AppendLine($"64 位系统：{Environment.Is64BitOperatingSystem}");
+        sb.AppendLine($"游戏：{AppState.Settings.GameName}");
+        sb.AppendLine($"游戏路径：{AppState.Settings.GamePath}");
 
         var gameDir = AppState.GameDir;
         if (gameDir != null)
         {
-            sb.AppendLine($"BepInEx present: {BepInExManager.IsInstalled(gameDir)}");
-            sb.AppendLine($"Mods enabled (winhttp.dll): {BepInExManager.ModsEnabled(gameDir)}");
+            sb.AppendLine($"BepInEx 是否存在：{BepInExManager.IsInstalled(gameDir)}");
+            sb.AppendLine($"模组总开关（winhttp.dll）：{BepInExManager.ModsEnabled(gameDir)}");
         }
 
         if (AppState.LogOutputPath is { } log && File.Exists(log))
@@ -52,7 +52,7 @@ internal static class BugReportManager
             try
             {
                 var fi = new FileInfo(log);
-                sb.AppendLine($"LogOutput.log: {fi.Length} bytes, last write {fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"LogOutput.log：{fi.Length} 字节，最后写入 {fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
             }
             catch { }
         }
@@ -63,18 +63,18 @@ internal static class BugReportManager
     private static string BuildModList()
     {
         var mods = ModInstaller.GetInstalled();
-        if (mods.Count == 0) return "(no mods installed)";
+        if (mods.Count == 0) return "（没有安装任何模组）";
 
         var sb = new StringBuilder();
         foreach (var m in mods)
         {
             sb.Append(m.Name)
               .Append(" - ")
-              .Append(m.Enabled ? "enabled" : "disabled");
+              .Append(m.Enabled ? "已启用" : "已禁用");
 
             if (!string.IsNullOrEmpty(m.Guid)) sb.Append(" - ").Append(m.Guid);
             if (!string.IsNullOrEmpty(m.KnownVersion)) sb.Append(" - v").Append(m.KnownVersion);
-            if (m.WritesLevelData) sb.Append(" - writes level data (").Append(m.NativeNamespace).Append(')');
+            if (m.WritesLevelData) sb.Append(" - 会写入关卡数据 (").Append(m.NativeNamespace).Append(')');
 
             sb.AppendLine();
         }

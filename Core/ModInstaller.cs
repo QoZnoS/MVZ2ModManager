@@ -114,10 +114,11 @@ internal static class ModInstaller
     }
 
     /// <summary>
-    /// 软删除：改名成 <c>*.delete</c>（文件夹式则整个目录改名）。
-    /// 同时清掉这套模组的版本记录。
+    /// 软删除插件本体：改名成 <c>*.delete</c>（文件夹式则整个目录改名）。
+    /// <para><b>不动资源目录</b> —— 那个由 <see cref="UninstallAssets"/> 单独负责，
+    /// 因为"只要插件、丢掉资源"和"整套一起丢"是两个不同的意图。</para>
     /// </summary>
-    public static void Uninstall(string modName)
+    public static void UninstallPluginFiles(string modName)
     {
         string? modsDir = AppState.ModsInstallDir;
         if (modsDir == null) return;
@@ -139,6 +140,59 @@ internal static class ModInstaller
         string trash = target + DeleteSuffix;
         if (File.Exists(trash)) File.Delete(trash);
         File.Move(target, trash);
+    }
+
+    /// <summary>
+    /// 卸载一个模组：插件文件 + （可选）它的资源目录。
+    /// </summary>
+    public static void Uninstall(InstalledMod mod, bool removeAssets)
+    {
+        UninstallPluginFiles(mod.Name);
+        if (removeAssets) UninstallAssets(mod.NativeNamespace);
+    }
+
+    // --------------------------------------------------------- 资源目录
+
+    /// <summary>
+    /// 模组的资源目录：<c>&lt;游戏目录&gt;\MinecraftVSZombies2_Data\StreamingAssets\Mods\&lt;命名空间&gt;\</c>。
+    /// 纯工具模组（没有原生命名空间）返回 null。
+    /// </summary>
+    public static string? AssetsDirFor(string? nativeNamespace) =>
+        nativeNamespace is { Length: > 0 } && AppState.StreamingAssetsModsDir is { } mods
+            ? Path.Combine(mods, nativeNamespace)
+            : null;
+
+    /// <summary>这套模组的磁盘上是否真有资源目录。</summary>
+    public static bool HasAssets(string? nativeNamespace)
+    {
+        string? dir = AssetsDirFor(nativeNamespace);
+        return dir != null && Directory.Exists(dir);
+    }
+
+    /// <summary>
+    /// 软删除资源目录（<c>&lt;nsp&gt;</c> → <c>&lt;nsp&gt;.delete</c>）。
+    /// 返回是否真的删了东西。
+    /// </summary>
+    public static bool UninstallAssets(string? nativeNamespace)
+    {
+        if (AssetsDirFor(nativeNamespace) is not { } dir || !Directory.Exists(dir)) return false;
+
+        string trash = dir + DeleteSuffix;
+        if (Directory.Exists(trash)) Directory.Delete(trash, recursive: true);
+        Directory.Move(dir, trash);
+        return true;
+    }
+
+    /// <summary>资源目录里一共有多少文件 / 多少字节（卸载确认框里给个数）。</summary>
+    public static (int Files, long Bytes) MeasureAssets(string? nativeNamespace)
+    {
+        if (AssetsDirFor(nativeNamespace) is not { } dir || !Directory.Exists(dir)) return (0, 0);
+        try
+        {
+            var files = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).ToList();
+            return (files.Count, files.Sum(SafeLength));
+        }
+        catch { return (0, 0); }
     }
 
     // ---------------------------------------------------------------- 开关

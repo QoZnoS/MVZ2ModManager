@@ -2,6 +2,17 @@ namespace MVZ2ModManager.Core;
 
 internal enum IssueLevel { Error, Warning, Info }
 
+/// <summary>问题级别的中文文案 —— 界面和自检报告共用，避免两处写法漂移。</summary>
+internal static class IssueLevelText
+{
+    public static string Of(IssueLevel level) => level switch
+    {
+        IssueLevel.Error => "错误",
+        IssueLevel.Warning => "提醒",
+        _ => "信息",
+    };
+}
+
 internal sealed record ModIssue(IssueLevel Level, string Message, string? ModName);
 
 /// <summary>
@@ -25,7 +36,7 @@ internal static class DependencyChecker
         if (!bepInExOn)
         {
             issues.Add(new ModIssue(IssueLevel.Error,
-                "BepInEx is switched off (winhttp.dll renamed). No mod will load until it's turned back on.",
+                "BepInEx 已被关闭（winhttp.dll 被改名）。在重新打开之前不会加载任何模组。",
                 null));
         }
 
@@ -38,8 +49,8 @@ internal static class DependencyChecker
             if (byGuid.TryGetValue(guid, out var existing))
             {
                 issues.Add(new ModIssue(IssueLevel.Error,
-                    $"\"{existing.Name}\" and \"{m.Name}\" both declare the same plugin GUID ({guid}). " +
-                    "BepInEx will only load one of them — remove or rename the stale copy.",
+                    $"「{existing.Name}」和「{m.Name}」声明了相同的插件 GUID（{guid}）。" +
+                    "BepInEx 只会加载其中一个 — 请删掉或改名那个多余的副本。",
                     m.Name));
                 continue;
             }
@@ -57,7 +68,7 @@ internal static class DependencyChecker
                 !string.Equals(filter, processName, StringComparison.OrdinalIgnoreCase))
             {
                 issues.Add(new ModIssue(IssueLevel.Warning,
-                    $"\"{m.Name}\" is limited to process \"{filter}\", so it won't load in this game ({processName}.exe).",
+                    $"「{m.Name}」限定了进程「{filter}」，因此在本次游戏（{processName}.exe）中不会加载。",
                     m.Name));
             }
 
@@ -66,14 +77,14 @@ internal static class DependencyChecker
                 if (!byGuid.TryGetValue(depGuid, out var dep))
                 {
                     issues.Add(new ModIssue(IssueLevel.Error,
-                        $"\"{m.Name}\" requires {Describe(depGuid)}, which is not installed. " +
-                        "BepInEx will skip this plugin.",
+                        $"「{m.Name}」需要 {Describe(depGuid)}，但它没有安装。" +
+                        "BepInEx 会跳过这个插件。",
                         m.Name));
                 }
                 else if (!dep.Enabled)
                 {
                     issues.Add(new ModIssue(IssueLevel.Error,
-                        $"\"{m.Name}\" requires \"{dep.Name}\", which is disabled. Enable it, or this plugin won't load.",
+                        $"「{m.Name}」需要「{dep.Name}」，但后者已被禁用。请启用它，否则这个插件不会加载。",
                         m.Name));
                 }
             }
@@ -83,7 +94,7 @@ internal static class DependencyChecker
                 if (byGuid.TryGetValue(badGuid, out var bad) && bad.Enabled)
                 {
                     issues.Add(new ModIssue(IssueLevel.Error,
-                        $"\"{m.Name}\" declares itself incompatible with \"{bad.Name}\" (both are enabled).",
+                        $"「{m.Name}」声明自己与「{bad.Name}」不兼容（两者都已启用）。",
                         m.Name));
                 }
             }
@@ -96,8 +107,8 @@ internal static class DependencyChecker
             if (dependents > 0)
             {
                 issues.Add(new ModIssue(IssueLevel.Error,
-                    $"\"{m.Name}\" is disabled, but {dependents} enabled mod{(dependents == 1 ? "" : "s")} depend on it. " +
-                    "Those will not load.",
+                    $"「{m.Name}」已被禁用，但有 {dependents} 个已启用的模组依赖它。" +
+                    "这些模组将无法加载。",
                     m.Name));
             }
         }

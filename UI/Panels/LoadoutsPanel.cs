@@ -29,11 +29,11 @@ internal sealed class LoadoutsPanel : UserControl
         DoubleBuffered = true;
 
         _toolbar = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 0, 8, 6) };
-        _newBtn       = MakeBtn("+ Save Current");
-        _refreshBtn   = MakeBtn("↺ Refresh");
-        _applyBtn     = MakeBtn("Apply");
-        _deleteBtn    = MakeBtn("Delete");
-        _openFolderBtn= MakeBtn("Open Folder ↗");
+        _newBtn       = MakeBtn("+ 保存当前");
+        _refreshBtn   = MakeBtn("↺ 刷新");
+        _applyBtn     = MakeBtn("应用");
+        _deleteBtn    = MakeBtn("删除");
+        _openFolderBtn= MakeBtn("打开目录 ↗");
 
         _applyBtn.Enabled  = false;
         _deleteBtn.Enabled = false;
@@ -78,19 +78,19 @@ internal sealed class LoadoutsPanel : UserControl
 
         _nameLbl = new Label
         {
-            Text = "Name", AutoSize = false, Height = 26,
-            Font = new Font("Segoe UI", 8.5f), TextAlign = ContentAlignment.MiddleLeft,
+            Text = "名称", AutoSize = false, Height = 26,
+            Font = ThemeEngine.MakeFont(8.5f), TextAlign = ContentAlignment.MiddleLeft,
             Dock = DockStyle.None, Width = 60,
         };
         _nameLbl.Tag = "subtext";
 
         _nameBox = new RTextBox
         {
-            PlaceholderText = "Custom name (optional)",
+            PlaceholderText = "自定义名称（可留空）",
             CornerRadius = 6,
             Width = 240, Height = 28,
         };
-        _nameBox.Inner.Font = new Font("Segoe UI", 9.5f);
+        _nameBox.Inner.Font = ThemeEngine.MakeFont(9.5f);
         _nameBox.Inner.Leave += (_, __) => SaveName();
         _nameBox.Inner.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { SaveName(); e.SuppressKeyPress = true; } };
 
@@ -100,9 +100,9 @@ internal sealed class LoadoutsPanel : UserControl
         nameRow.Controls.Add(_nameLbl);
         nameRow.Controls.Add(_nameBox);
 
-        _enabledLbl  = MakeLabel("Enabled");
-        _disabledLbl = MakeLabel("Disabled");
-        _missingLbl  = MakeLabel("Missing");
+        _enabledLbl  = MakeLabel("已启用");
+        _disabledLbl = MakeLabel("已禁用");
+        _missingLbl  = MakeLabel("缺失");
 
         _enabledList  = MakeSubList();
         _disabledList = MakeSubList();
@@ -149,14 +149,14 @@ internal sealed class LoadoutsPanel : UserControl
 
     public void Refresh_()
     {
-        if (AppState.GameDir == null) { _statusLabel.Text = "No game selected."; return; }
+        if (AppState.GameDir == null) { _statusLabel.Text = "未选择游戏。"; return; }
         AppState.EnsureDataDir();
         _loadouts = DataBridge.LoadLoadouts();
         _loadoutList.BeginUpdate();
         _loadoutList.Items.Clear();
         foreach (var l in _loadouts.OrderBy(l => l.Number)) _loadoutList.Items.Add(l);
         _loadoutList.EndUpdate();
-        _statusLabel.Text = $"{_loadouts.Count} loadouts";
+        _statusLabel.Text = $"{_loadouts.Count} 个快照点";
 
         if (_selected != null && !_loadouts.Any(l => l.Number == _selected.Number))
             ShowDetail(null);
@@ -173,9 +173,9 @@ internal sealed class LoadoutsPanel : UserControl
             _enabledList.Items.Clear();
             _disabledList.Items.Clear();
             _missingList.Items.Clear();
-            _enabledLbl.Text  = "Enabled";
-            _disabledLbl.Text = "Disabled";
-            _missingLbl.Text  = "Missing";
+            _enabledLbl.Text  = "已启用";
+            _disabledLbl.Text = "已禁用";
+            _missingLbl.Text  = "缺失";
             _nameChanging = true;
             _nameBox.Text = "";
             _nameChanging = false;
@@ -195,9 +195,9 @@ internal sealed class LoadoutsPanel : UserControl
         foreach (var m in _selected.DisabledMods) _disabledList.Items.Add(m);
         foreach (var m in _selected.MissingMods)  _missingList.Items.Add(m);
 
-        _enabledLbl.Text  = $"Enabled ({_selected.EnabledMods.Count})";
-        _disabledLbl.Text = $"Disabled ({_selected.DisabledMods.Count})";
-        _missingLbl.Text  = $"Missing ({_selected.MissingMods.Count})";
+        _enabledLbl.Text  = $"已启用 ({_selected.EnabledMods.Count})";
+        _disabledLbl.Text = $"已禁用 ({_selected.DisabledMods.Count})";
+        _missingLbl.Text  = $"缺失 ({_selected.MissingMods.Count})";
     }
 
     private void SaveName()
@@ -214,11 +214,11 @@ internal sealed class LoadoutsPanel : UserControl
 
     private void DoSave()
     {
-        if (AppState.GameDir == null) { MessageBox.Show("No game path set.", "Error"); return; }
-        if (_loadouts.Count >= 20)   { MessageBox.Show("Loadout cap is 20. Delete one first.", "Full"); return; }
+        if (AppState.GameDir == null) { MessageBox.Show("还没有设置游戏目录。", "错误"); return; }
+        if (_loadouts.Count >= 20)   { MessageBox.Show("快照点上限是 20 个，请先删掉一个。", "已达上限"); return; }
 
         string? plugins = AppState.ModsInstallDir;
-        if (plugins == null) { MessageBox.Show("No game path set.", "Error"); return; }
+        if (plugins == null) { MessageBox.Show("还没有设置游戏目录。", "错误"); return; }
 
         var enabled  = Directory.Exists(plugins) ? Directory.GetFiles(plugins, "*.dll").Select(f => Path.GetFileNameWithoutExtension(f)).ToList() : new();
         var disabled = Directory.Exists(plugins) ? Directory.GetFiles(plugins, "*.dll.disabled").Select(f => Path.GetFileNameWithoutExtension(f).Replace(".dll", "")).ToList() : new();
@@ -228,14 +228,14 @@ internal sealed class LoadoutsPanel : UserControl
         DataBridge.SaveLoadouts(_loadouts);
         SaveConfigSnapshot(next);
         Refresh_();
-        _statusLabel.Text = $"Loadout {next} saved.";
+        _statusLabel.Text = $"已保存为快照点 {next}。";
     }
 
     private void DoApply()
     {
         if (_selected == null) return;
         string? plugins = AppState.ModsInstallDir;
-        if (plugins == null) { MessageBox.Show("No game path set.", "Error"); return; }
+        if (plugins == null) { MessageBox.Show("还没有设置游戏目录。", "错误"); return; }
 
         var updated = new ModLoadout
         {
@@ -266,13 +266,13 @@ internal sealed class LoadoutsPanel : UserControl
         if (idx >= 0) _loadouts[idx] = updated;
         DataBridge.SaveLoadouts(_loadouts);
         RestoreConfigSnapshot(_selected.Number);
-        _statusLabel.Text = $"{_selected.DisplayName} applied.";
+        _statusLabel.Text = $"已应用「{_selected.DisplayName}」。";
     }
 
     private void DoDelete()
     {
         if (_selected == null) return;
-        if (MessageBox.Show($"Delete {_selected.DisplayName}?", "Confirm", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+        if (MessageBox.Show($"要删除「{_selected.DisplayName}」吗？", "确认", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
         _loadouts.RemoveAll(l => l.Number == _selected.Number);
         DataBridge.SaveLoadouts(_loadouts);
         DeleteConfigSnapshot(_selected.Number);
@@ -284,7 +284,7 @@ internal sealed class LoadoutsPanel : UserControl
     private static string? ConfigSnapshotDir(int number) => DataBridge.ConfigSnapshotDir(number);
 
     /// <summary>
-    /// 快照整份 <c>BepInEx/config</c>。存档点不只记"哪些模组开着"，
+    /// 快照整份 <c>BepInEx/config</c>。快照点不只记"哪些模组开着"，
     /// 也记"它们当时是怎么配的" —— 否则切回去之后行为还是不一样。
     /// </summary>
     private static void SaveConfigSnapshot(int number)
@@ -345,8 +345,10 @@ internal sealed class LoadoutsPanel : UserControl
         using (var brush = new SolidBrush(sel ? t.Highlight : t.Surface))
             e.Graphics.FillPath(brush, path);
 
-        e.Graphics.DrawString(l.DisplayName, new Font("Segoe UI", 10f, FontStyle.Bold), new SolidBrush(t.Text), card.Left + 10, card.Top + 6);
-        e.Graphics.DrawString($"{l.EnabledMods.Count} on · {l.DisabledMods.Count} off · {l.MissingMods.Count} missing", new Font("Segoe UI", 8f), new SolidBrush(t.SubText), card.Left + 10, card.Top + 26);
+        using var titleFont = ThemeEngine.MakeFont(10f, FontStyle.Bold);
+        using var subFont = ThemeEngine.MakeFont(8f);
+        CardText.Draw(e.Graphics, card, 10, titleFont, l.DisplayName, t.Text, subFont,
+            $"{l.EnabledMods.Count} 启用 · {l.DisabledMods.Count} 禁用 · {l.MissingMods.Count} 缺失", t.SubText);
     }
 
     private void ApplyTheme()
@@ -399,7 +401,7 @@ internal sealed class LoadoutsPanel : UserControl
     private static Label MakeLabel(string text) => new()
     {
         Text = text, AutoSize = false, Dock = DockStyle.Top, Height = 20,
-        Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
+        Font = ThemeEngine.MakeFont(8.5f, FontStyle.Regular),
         Padding = new Padding(2, 2, 0, 2),
     };
 

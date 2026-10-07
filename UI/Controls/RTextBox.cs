@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using MVZ2ModManager.Theme;
 
 namespace MVZ2ModManager.UI.Controls;
 
@@ -48,19 +49,27 @@ internal sealed class RTextBox : Panel
         {
             BorderStyle = BorderStyle.None,
             Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-            Font = new Font("Segoe UI", 9.5f),
+            Font = ThemeEngine.MakeFont(9.5f),
         };
         Controls.Add(Inner);
+
+        // 字体变了，行的实际高度也跟着变 —— 不重算 Top 就会偏。
+        Inner.FontChanged += (_, __) => PositionInner();
         PositionInner();
     }
 
     private void PositionInner()
     {
-
         if (Inner == null) return;
+
+        // 单行无边框 TextBox 真正用来画一行字的高度是 PreferredHeight，
+        // 而它自己的 Height 是个跟字体无关的默认值（20）。
+        // 只挪 Top、不设 Height 的话，框比字高时文字会整体偏下 —— 两个都得算。
+        int lineHeight = Math.Max(1, Inner.PreferredHeight);
+        Inner.Height = lineHeight;
         Inner.Left = Padding.Left;
         Inner.Width = Math.Max(0, Width - Padding.Horizontal);
-        Inner.Top = Math.Max(0, (Height - Inner.PreferredHeight) / 2);
+        Inner.Top = Math.Max(0, (Height - lineHeight) / 2);
     }
 
     protected override void OnPaint(PaintEventArgs e)

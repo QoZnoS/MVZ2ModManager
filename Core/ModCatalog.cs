@@ -46,7 +46,7 @@ internal static class ModCatalog
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            [Mvz2Catalog.VanillaNamespace] = "Vanilla (game)",
+            [Mvz2Catalog.VanillaNamespace] = "原版游戏",
         };
 
         foreach (var m in mods)

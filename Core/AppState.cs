@@ -163,8 +163,7 @@ internal static class AppState
         catch { return null; }
     }
 
-    /// <summary>
-    /// 自动找一个可用的游戏：环境变量 → 历史选择 → 内置预设。
+    /// <summary>自动找一个可用的游戏：环境变量 → 历史选择 → 内置预设。
     /// 全都落空时返回 null，由调用方弹目录选择器。
     /// </summary>
     public static string? AutoDetectGame()
@@ -187,5 +186,17 @@ internal static class AppState
                 if (File.Exists(p)) return p;
 
         return null;
+    }
+
+    /// <summary>
+    /// 游戏进程是否在跑。在跑的时候 <c>BepInEx\plugins\*.dll</c> 是被锁住的，
+    /// 任何改名/删文件操作都会失败，所以调用方要先问一句。
+    /// </summary>
+    public static bool IsGameRunning()
+    {
+        string? name = GameProcessName;
+        if (string.IsNullOrEmpty(name)) return false;
+        try { return System.Diagnostics.Process.GetProcessesByName(name).Length > 0; }
+        catch { return false; }
     }
 }

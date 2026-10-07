@@ -33,6 +33,9 @@ internal sealed class InstalledPanel : UserControl
     private readonly RButton _refreshBtn, _issuesBtn, _enableAllBtn, _disableAllBtn, _uninstallAllBtn, _openFolderBtn;
     private readonly RTextBox _search;
 
+    /// <summary>我们自己改列宽时置位，避免和用户的拖动互相触发。</summary>
+    private bool _adjustingColumns;
+
     public InstalledPanel()
     {
         Dock = DockStyle.Fill;
@@ -41,12 +44,12 @@ internal sealed class InstalledPanel : UserControl
         // ------------------------------------------------ 工具栏
         _toolbar = new Panel { Dock = DockStyle.Top, Height = 44, Padding = new Padding(8, 0, 8, 6) };
 
-        _refreshBtn = MakeBtn("↺ Refresh");
-        _issuesBtn = MakeBtn("⚠ Issues");
-        _openFolderBtn = MakeBtn("Open Plugins ↗");
-        _enableAllBtn = MakeBtn("Enable All");
-        _disableAllBtn = MakeBtn("Disable All");
-        _uninstallAllBtn = MakeBtn("Uninstall All");
+        _refreshBtn = MakeBtn("↺ 刷新");
+        _issuesBtn = MakeBtn("⚠ 问题");
+        _openFolderBtn = MakeBtn("打开插件目录 ↗");
+        _enableAllBtn = MakeBtn("全部启用");
+        _disableAllBtn = MakeBtn("全部禁用");
+        _uninstallAllBtn = MakeBtn("全部卸载");
 
         _issuesBtn.Visible = false;
 
@@ -59,7 +62,7 @@ internal sealed class InstalledPanel : UserControl
 
         _search = new RTextBox
         {
-            PlaceholderText = "Search installed...",
+            PlaceholderText = "搜索已安装的模组…",
             Width = 180,
             Height = 38,
             CornerRadius = 8,
@@ -96,12 +99,12 @@ internal sealed class InstalledPanel : UserControl
 
         // ------------------------------------------------ 警告条
         _banner = new Panel { Dock = DockStyle.Top, Height = 34, Visible = false, Padding = new Padding(10, 0, 6, 0) };
-        _bannerBtn = new RButton { Text = "Details", Dock = DockStyle.Right, Width = 84, CornerRadius = 6 };
+        _bannerBtn = new RButton { Text = "详情", Dock = DockStyle.Right, Width = 84, CornerRadius = 6 };
         _bannerBtn.Click += (_, __) => ShowIssues();
         _bannerLabel = new Label
         {
             Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-            AutoEllipsis = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            AutoEllipsis = true, Font = ThemeEngine.MakeFont(9f, FontStyle.Bold),
         };
         _banner.Controls.Add(_bannerBtn);
         _banner.Controls.Add(_bannerLabel);
@@ -117,16 +120,17 @@ internal sealed class InstalledPanel : UserControl
             OwnerDraw = true,
             MultiSelect = true,
         };
-        _list.Columns.Add("Name", 210);
-        _list.Columns.Add("Status", 82);
-        _list.Columns.Add("Plugin GUID", 200);
-        _list.Columns.Add("Size", 70);
+        _list.Columns.Add("名称", 210);
+        _list.Columns.Add("状态", 82);
+        _list.Columns.Add("插件 GUID", 200);
+        _list.Columns.Add("大小", 70);
         _list.Columns.Add("", 34);   // 开关
         _list.Columns.Add("", 34);   // 删除
         _list.DrawColumnHeader += DrawHeader;
         _list.DrawItem += DrawItem;
         _list.DrawSubItem += (_, e) => e.DrawDefault = false;
         _list.MouseDown += List_MouseDown;
+        _list.ColumnWidthChanging += List_ColumnWidthChanging;
         _list.HandleCreated += (_, __) => ThemeEngine.StripVisualStyle(_list);
         _list.Resize += (_, __) => StretchNameColumn();
 
@@ -172,17 +176,40 @@ internal sealed class InstalledPanel : UserControl
 
     private async Task RefreshSavesAsync()
     {
+        if (!AppState.Settings.WarnAboutSaveRisk)
+        {
+            // 设置里关掉了存档提醒 —— 连扫描都省了（那是一次磁盘 I/O）。
+            _saveWarnings = new();
+            UpdateBanner();
+            return;
+        }
+
         var usages = await Task.Run(() => SaveCompatibility.Summarize(SaveCompatibility.ScanAll()));
 
         if (IsDisposed) return;
 
-        var owners = ModCatalog.NamespaceOwners(_mods);
-        var enabledNs = new HashSet<string>(
-            _mods.Where(m => m.Enabled && m.NativeNamespace != null).Select(m => m.NativeNamespace!),
+        _saveWarnings = RequiredWarnings(usages);
+        UpdateBanner();
+    }
+
+    /// <summary>当前启用中的模组覆盖了哪些命名空间（<paramref name="excluding"/> 里的名字当作已禁用）。</summary>
+    private HashSet<string> EnabledNamespaces(IEnumerable<string>? excluding = null)
+        => new(_mods
+                .Where(m => m.Enabled && m.NativeNamespace != null
+                         && (excluding == null || !excluding.Contains(m.Name, StringComparer.OrdinalIgnoreCase)))
+                .Select(m => m.NativeNamespace!),
             StringComparer.OrdinalIgnoreCase);
 
-        _saveWarnings = SaveCompatibility.RequiredButDisabled(usages, owners, enabledNs);
-        UpdateBanner();
+    /// <summary>
+    /// 从存档使用情况里挑出"会读不进去"的那部分。
+    ///
+    /// <para>设置里关掉存档提醒时**直接返回空** —— 门就守在这一处：
+    /// 让调用方各判各的，迟早会漏掉一处，然后提醒又从别的路弹回来。</para>
+    /// </summary>
+    internal List<SaveWarning> RequiredWarnings(IReadOnlyList<SaveUsage> usages)
+    {
+        if (!AppState.Settings.WarnAboutSaveRisk) return new();
+        return SaveCompatibility.RequiredButDisabled(usages, ModCatalog.NamespaceOwners(_mods), EnabledNamespaces());
     }
 
     private void FindConflicts()
@@ -211,7 +238,7 @@ internal sealed class InstalledPanel : UserControl
 
         foreach (var (file, owners) in byFile)
             if (owners.Count > 1)
-                _conflicts.Add($"{file} is shipped by {string.Join(" and ", owners)} — only one will load.");
+                _conflicts.Add($"{file} 被 {string.Join("、", owners)} 同时提供 — 只会加载其中一个。");
     }
 
     private void PopulateList()
@@ -228,8 +255,10 @@ internal sealed class InstalledPanel : UserControl
         foreach (var m in _filtered)
         {
             var item = new ListViewItem(m.Name) { Tag = m };
-            item.SubItems.Add(m.Enabled ? "Enabled" : "Disabled");
-            item.SubItems.Add(m.Guid ?? "—");
+            item.SubItems.Add(m.Enabled ? "已启用" : "已禁用");
+            item.SubItems.Add(m.Guid is { Length: > 0 } g
+                ? (m.NativeNamespace is { Length: > 0 } nsp ? $"{g}  [{nsp}]" : g)
+                : "—");
             item.SubItems.Add(FormatSize(m.SizeBytes));
             item.SubItems.Add("");
             item.SubItems.Add("");
@@ -246,14 +275,14 @@ internal sealed class InstalledPanel : UserControl
 
         var parts = new List<string>
         {
-            $"{_mods.Count} mod{(_mods.Count == 1 ? "" : "s")}",
-            $"{enabled} enabled, {_mods.Count - enabled} disabled",
+            $"{_mods.Count} 个模组",
+            $"{enabled} 已启用 · {_mods.Count - enabled} 已禁用",
             $"{FormatSize(total)}",
         };
 
         int blocked = _issues.Count(i => i.Level == IssueLevel.Error);
-        if (blocked > 0) parts.Add($"{blocked} problem{(blocked == 1 ? "" : "s")}");
-        if (_conflicts.Count > 0) parts.Add($"{_conflicts.Count} file conflict{(_conflicts.Count == 1 ? "" : "s")}");
+        if (blocked > 0) parts.Add($"{blocked} 个问题");
+        if (_conflicts.Count > 0) parts.Add($"{_conflicts.Count} 个文件冲突");
 
         _statusLabel.Text = string.Join("  ·  ", parts);
     }
@@ -271,22 +300,22 @@ internal sealed class InstalledPanel : UserControl
         {
             text = errors == 1
                 ? _issues.First(i => i.Level == IssueLevel.Error).Message
-                : $"{errors} problems will stop mods from loading (missing dependencies, duplicates, ...).";
+                : $"{errors} 个问题会导致模组无法加载（缺少前置、GUID 重复……）。";
         }
         else if (_saveWarnings.Count > 0)
         {
             int n = _saveWarnings.Count;
             int saves = _saveWarnings.Sum(w => w.SaveCount);
-            text = $"{n} disabled mod{(n == 1 ? "" : "s")} {(n == 1 ? "is" : "are")} still needed by "
-                 + $"{saves} existing save{(saves == 1 ? "" : "s")} — those won't load.";
+            text = $"{n} 个已禁用的模组仍被 "
+                 + $"{saves} 份现有存档依赖 — 这些存档将无法读取。";
         }
         else if (_conflicts.Count > 0)
         {
-            text = $"{_conflicts.Count} file conflict{(_conflicts.Count == 1 ? "" : "s")} between installed mods.";
+            text = $"已安装的模组之间有 {_conflicts.Count} 个文件冲突。";
         }
         else if (warnings > 0)
         {
-            text = $"{warnings} warning{(warnings == 1 ? "" : "s")}.";
+            text = $"{warnings} 条提醒。";
             tint = ThemeEngine.Current.SubText;
         }
 
@@ -331,7 +360,7 @@ internal sealed class InstalledPanel : UserControl
         }
         catch (IOException)
         {
-            MessageBox.Show("The plugin DLL is locked — close the game first.", "Can't change it",
+            MessageBox.Show("插件 DLL 被占用 — 请先关闭游戏。", "无法修改",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
@@ -352,14 +381,11 @@ internal sealed class InstalledPanel : UserControl
             .ToList();
 
         var riskySaves = new List<SaveWarning>();
-        if (disabledNs.Count > 0)
+        if (AppState.Settings.WarnAboutSaveRisk && disabledNs.Count > 0)
         {
             var usages = SaveCompatibility.Summarize(SaveCompatibility.ScanAll());
             var owners = ModCatalog.NamespaceOwners(_mods);
-            var stillEnabled = new HashSet<string>(
-                _mods.Where(m => m.Enabled && !list.Contains(m.Name, StringComparer.OrdinalIgnoreCase) && m.NativeNamespace != null)
-                     .Select(m => m.NativeNamespace!),
-                StringComparer.OrdinalIgnoreCase);
+            var stillEnabled = EnabledNamespaces(list);
 
             riskySaves = usages
                 .Where(u => disabledNs.Contains(u.Namespace, StringComparer.OrdinalIgnoreCase))
@@ -373,58 +399,74 @@ internal sealed class InstalledPanel : UserControl
         if (broken.Count == 0 && riskySaves.Count == 0) return true;
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine(list.Count == 1 ? $"Disable {list[0]}?" : $"Disable {list.Count} mods?");
+        sb.AppendLine(list.Count == 1 ? $"要禁用「{list[0]}」吗？" : $"要禁用 {list.Count} 个模组吗？");
         sb.AppendLine();
 
         if (broken.Count > 0)
         {
-            sb.AppendLine($"These enabled mods require something you're disabling and will stop working:");
+            sb.AppendLine($"以下已启用的模组依赖你正在禁用的东西，禁用后它们会失效：");
             foreach (var b in broken) sb.AppendLine("  • " + b);
             sb.AppendLine();
         }
 
         if (riskySaves.Count > 0)
         {
-            sb.AppendLine("These saved levels need a mod you're disabling, and will refuse to load:");
+            sb.AppendLine("以下存档需要你正在禁用的模组，禁用后将无法读取：");
             foreach (var w in riskySaves)
-                sb.AppendLine($"  • {w.SaveCount} save{(w.SaveCount == 1 ? "" : "s")} ({w.Namespace}@{w.VersionRange})"
-                            + (w.Samples.Count > 0 ? "  e.g. " + string.Join(", ", w.Samples.Take(3)) : ""));
+                sb.AppendLine($"  • {w.SaveCount} 份存档（{w.Namespace}@{w.VersionRange}）"
+                            + (w.Samples.Count > 0 ? "  例如：" + string.Join("、", w.Samples.Take(3)) : ""));
             sb.AppendLine();
-            sb.AppendLine("The save data itself isn't deleted — turn the mod back on and they load again.");
+            sb.AppendLine("存档数据本身不会被删除 — 重新启用该模组后它们又能读了。");
             sb.AppendLine();
         }
 
-        sb.Append("Continue?");
+        sb.Append("要继续吗？");
 
-        return MessageBox.Show(sb.ToString(), "Before you disable this",
+        return MessageBox.Show(sb.ToString(), "禁用前请确认",
             MessageBoxButtons.YesNo,
             riskySaves.Count > 0 || broken.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) == DialogResult.Yes;
     }
 
+    /// <summary>
+    /// 卸载一个模组。**资源目录单独问一次** —— MVZ2 的模组往往是"插件 dll + 一整套
+    /// StreamingAssets 资源"两部分，只丢 dll 会留下一堆孤儿资源，一起丢又可能误删。
+    /// </summary>
     private void UninstallMod(InstalledMod m)
     {
         var dependents = _mods
-            .Where(x => x.Name != m.Name && x.HardDependencies.Contains(m.Guid ?? "\u0000", StringComparer.OrdinalIgnoreCase))
+            .Where(x => x.Name != m.Name && x.Guid is { Length: > 0 } &&
+                        x.HardDependencies.Contains(m.Guid!, StringComparer.OrdinalIgnoreCase))
             .Select(x => x.Name)
             .ToList();
 
-        string warning = dependents.Count > 0
-            ? $"\n\n{string.Join(", ", dependents)} depend{(dependents.Count == 1 ? "s" : "")} on it."
-            : "";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"卸载 {m.Name}？");
+        sb.AppendLine();
 
-        if (MessageBox.Show(
-                $"Uninstall {m.Name}?{warning}\n\nThe files are renamed to *.delete (not erased), so you can get them back.",
-                "Confirm", MessageBoxButtons.YesNo,
-                dependents.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.Yes)
+        if (dependents.Count > 0)
+        {
+            sb.AppendLine($"⚠ {string.Join("、", dependents)} 依赖它，卸载后这些模组将无法加载。");
+            sb.AppendLine();
+        }
+
+        sb.Append("插件文件会被改名成 *.delete（不是删除），可以手动恢复。");
+
+        var (files, bytes) = ModInstaller.MeasureAssets(m.NativeNamespace);
+        string? checkText = files > 0
+            ? $"同时移除资源目录 StreamingAssets\\Mods\\{m.NativeNamespace}\\（{files} 个文件，{FormatSize(bytes)}）"
+            : null;
+
+        if (!CheckboxConfirmDialog.Show(this, "确认卸载", sb.ToString(), checkText, out bool removeAssets,
+                checkDefault: true))
             return;
 
         try
         {
-            ModInstaller.Uninstall(m.Name);
+            ModInstaller.Uninstall(m, removeAssets);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("Couldn't uninstall: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("卸载失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
@@ -447,10 +489,10 @@ internal sealed class InstalledPanel : UserControl
         if (failed.Count > 0)
         {
             MessageBox.Show(
-                $"Couldn't change {failed.Count} mod{(failed.Count == 1 ? "" : "s")} — the DLLs are locked:\n\n"
+                $"有 {failed.Count} 个模组没能改成功 — 这些 DLL 被占用了：\n\n"
                 + string.Join("\n", failed.Take(10))
-                + "\n\nClose the game and try again.",
-                "Locked", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                + "\n\n请关闭游戏后重试。",
+                "被占用", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -458,16 +500,26 @@ internal sealed class InstalledPanel : UserControl
     {
         if (_mods.Count == 0) return;
 
-        if (MessageBox.Show(
-                $"Uninstall all {_mods.Count} mods?\n\n" +
-                "This includes DSHCore. The files are renamed to *.delete, so nothing is erased — " +
-                "but keep in mind that only BepInEx itself decides what loads: a *.delete file never loads.",
-                "Uninstall everything", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        int assetMods = _mods.Count(m => ModInstaller.HasAssets(m.NativeNamespace));
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"卸载全部 {_mods.Count} 个模组？");
+        sb.AppendLine();
+        sb.AppendLine("包括 DSHCore —— 之后游戏会回到「完全没有模组」的状态。");
+        sb.AppendLine();
+        sb.Append("插件文件会被改名成 *.delete，什么都没有真正删除。");
+
+        string? checkText = assetMods > 0
+            ? $"同时移除 {assetMods} 个模组的资源目录（StreamingAssets\\Mods\\ 下）"
+            : null;
+
+        if (!CheckboxConfirmDialog.Show(this, "卸载全部", sb.ToString(), checkText, out bool removeAssets,
+                checkDefault: false))
             return;
 
         foreach (var m in _mods)
         {
-            try { ModInstaller.Uninstall(m.Name); } catch { }
+            try { ModInstaller.Uninstall(m, removeAssets); } catch { }
         }
 
         Refresh_();
@@ -480,31 +532,31 @@ internal sealed class InstalledPanel : UserControl
 
         if (_issues.Count > 0)
         {
-            lines.Add("=== Loading problems ===");
+            lines.Add("=== 加载问题 ===");
             foreach (var i in _issues)
-                lines.Add($"[{i.Level}] {i.Message}");
+                lines.Add($"[{IssueLevelText.Of(i.Level)}] {i.Message}");
             lines.Add("");
         }
 
         if (_saveWarnings.Count > 0)
         {
-            lines.Add("=== Saves that need a disabled mod ===");
+            lines.Add("=== 需要已禁用模组的存档 ===");
             foreach (var w in _saveWarnings)
-                lines.Add($"[{w.Namespace}@{w.VersionRange}] {w.SaveCount} save(s), owner: {w.Owner}"
+                lines.Add($"[{w.Namespace}@{w.VersionRange}] {w.SaveCount} 份存档，提供者：{w.Owner}"
                         + (w.Samples.Count > 0 ? "\n    " + string.Join("\n    ", w.Samples) : ""));
             lines.Add("");
         }
 
         if (_conflicts.Count > 0)
         {
-            lines.Add("=== File conflicts ===");
+            lines.Add("=== 文件冲突 ===");
             lines.AddRange(_conflicts);
             lines.Add("");
         }
 
-        if (lines.Count == 0) { lines.Add("Nothing to report — everything looks fine."); }
+        if (lines.Count == 0) { lines.Add("一切正常，没有问题。"); }
 
-        MessageBox.Show(string.Join("\n", lines), "Issues", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show(string.Join("\n", lines), "问题", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void OpenFolder()
@@ -520,11 +572,58 @@ internal sealed class InstalledPanel : UserControl
     private void StretchNameColumn()
     {
         if (_list.Columns.Count == 0) return;
+
         int used = 0;
         for (int i = 1; i < _list.Columns.Count; i++) used += _list.Columns[i].Width;
         int nameWidth = _list.ClientSize.Width - used;
-        if (nameWidth > _list.Columns[0].Width) _list.Columns[0].Width = nameWidth;
+        if (nameWidth <= _list.Columns[0].Width) return;
+
+        _adjustingColumns = true;
+        try { _list.Columns[0].Width = nameWidth; }
+        finally { _adjustingColumns = false; }
     }
+
+    /// <summary>
+    /// 拖动分隔条时让两列之和保持不变（见 <see cref="ColumnResize"/>）。
+    ///
+    /// <para>只改**右边**那一列，被拖的那列交给原生逻辑 —— 在这里连着改它，
+    /// 会被原生逻辑在多拖一拍之后按自己的算法再盖回去，总宽度又开始漂。</para>
+    /// </summary>
+    private void List_ColumnWidthChanging(object? sender, ColumnWidthChangingEventArgs e)
+        => ApplyColumnResize(e.ColumnIndex, e.NewWidth);
+
+    /// <summary>
+    /// 列宽调整的实际动作。抽出来是为了让自检能**直接调它** ——
+    /// 拖拽这个手势没法自动测，但"拖完之后总宽度有没有变"可以。
+    /// </summary>
+    /// <returns>真的动了列宽就返回 true。</returns>
+    internal bool ApplyColumnResize(int columnIndex, int newWidth)
+    {
+        if (_adjustingColumns) return false;
+
+        int i = columnIndex;
+        if (i < 0 || i + 1 >= _list.Columns.Count) return false;
+
+        // 此刻被拖的列还没被改，Columns[i] 仍是"拖动前"的宽度。
+        var moved = ColumnResize.Preserve(_list.Columns[i].Width, _list.Columns[i + 1].Width, newWidth);
+        if (moved is not { } pair) return false;
+
+        _adjustingColumns = true;
+        try
+        {
+            _list.Columns[i].Width = pair.Left;
+            _list.Columns[i + 1].Width = pair.Right;
+        }
+        finally { _adjustingColumns = false; }
+
+        return true;
+    }
+
+    /// <summary>开发用：当前各列宽度（自检与截图日志会读它）。</summary>
+    internal int[] ColumnWidths => _list.Columns.Cast<ColumnHeader>().Select(c => c.Width).ToArray();
+
+    /// <summary>开发用：当前列宽的文本形式。</summary>
+    internal string ColumnWidthReport => string.Join(" / ", ColumnWidths);
 
     private static string FormatSize(long bytes)
     {
@@ -540,12 +639,29 @@ internal sealed class InstalledPanel : UserControl
         var t = ThemeEngine.Current;
         using var bg = new SolidBrush(t.SurfaceAlt);
         e.Graphics.FillRectangle(bg, e.Bounds);
-        using var fg = new SolidBrush(t.SubText);
-        e.Graphics.DrawString(e.Header!.Text, new Font("Segoe UI", 9f), fg,
-            e.Bounds.Left + 6, e.Bounds.Top + (e.Bounds.Height - 14) / 2);
+
+        using var font = ThemeEngine.MakeFont(9f);
+        TextRenderer.DrawText(e.Graphics, e.Header!.Text, font, TextCellRect(e.Bounds, 6), t.SubText, CellTextFlags);
+
         using var pen = new Pen(t.Border);
         e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
     }
+
+    /// <summary>
+    /// 单元格文字的绘制方式：**垂直居中 + 超宽省略号**。
+    ///
+    /// <para>以前是 DrawString 配一个写死 14 当行高去算居中位置 —— 9pt 字体的实际行高
+    /// 约 15~17px，比 14 大，于是文字整体偏下、底部还被行高切掉一截。
+    /// 改用 TextRenderer 的 VerticalCenter 让它按真实行高算；EndEllipsis 顺手解决
+    /// 长 GUID 和右侧列挤在一起的问题（GDI 按矩形宽度裁剪，不会画出格子）。</para>
+    /// </summary>
+    private const TextFormatFlags CellTextFlags =
+        TextFormatFlags.Left | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
+        TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+
+    /// <summary>文字落在单元格内部：左右各留 <paramref name="inset"/>。</summary>
+    private static Rectangle TextCellRect(Rectangle cell, int inset)
+        => new(cell.Left + inset, cell.Top, Math.Max(0, cell.Width - inset * 2), cell.Height);
 
     private void DrawItem(object? sender, DrawListViewItemEventArgs e)
     {
@@ -567,20 +683,21 @@ internal sealed class InstalledPanel : UserControl
             e.Graphics.FillPath(brush, path);
         }
 
-        var font = new Font("Segoe UI", 9f);
+        using var font = ThemeEngine.MakeFont(9f);
         int x = e.Bounds.Left;
         for (int col = 0; col < 4 && col < item.SubItems.Count; col++)
         {
             int width = _list.Columns[col].Width;
             string text = item.SubItems[col].Text;
 
-            Color fg = col == 1 ? (text == "Enabled" ? Color.FromArgb(39, 201, 63) : Color.FromArgb(255, 95, 86))
+            bool rowEnabled = item.Tag is InstalledMod rm && rm.Enabled;
+            Color fg = col == 1 ? (rowEnabled ? Color.FromArgb(39, 201, 63) : Color.FromArgb(255, 95, 86))
                      : col == 2 ? t.SubText
                      : disabledMod ? t.SubText
                      : t.Text;
 
             var cell = new Rectangle(x, e.Bounds.Top, width, e.Bounds.Height);
-            e.Graphics.DrawString(text, font, new SolidBrush(fg), cell.Left + 6, cell.Top + (cell.Height - 14) / 2);
+            TextRenderer.DrawText(e.Graphics, text, font, TextCellRect(cell, 6), fg, CellTextFlags);
             x += width;
         }
 

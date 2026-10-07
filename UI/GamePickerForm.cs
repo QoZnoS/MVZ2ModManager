@@ -36,7 +36,7 @@ internal sealed class GamePickerForm : Form
         Icon = AppIcons.Icon;
         StartPosition = FormStartPosition.CenterScreen;
         DoubleBuffered = true;
-        Text = "Select Game";
+        Text = "选择游戏";
         FormBorderStyle = FormBorderStyle.None;
         ClientSize = new Size(520, 430);
 
@@ -50,20 +50,20 @@ internal sealed class GamePickerForm : Form
 
         var heading = new Label
         {
-            Text = "Where is Minecraft vs Zombies 2?",
+            Text = "《Minecraft vs Zombies 2》装在哪里？",
             Dock = DockStyle.Top,
             Height = 28,
-            Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
+            Font = ThemeEngine.MakeFont(11.5f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
         };
 
         _hint = new Label
         {
-            Text = "Pick the game's root folder (the one containing MinecraftVSZombies2.exe "
-                 + "and MinecraftVSZombies2_Data).",
+            Text = "请选择游戏根目录（也就是含有 MinecraftVSZombies2.exe "
+                 + "和 MinecraftVSZombies2_Data 的那一层）。",
             Dock = DockStyle.Top,
             Height = 46,
-            Font = new Font("Segoe UI", 8.5f),
+            Font = ThemeEngine.MakeFont(8.5f),
             TextAlign = ContentAlignment.TopLeft,
         };
         _hint.Tag = "subtext";
@@ -71,7 +71,7 @@ internal sealed class GamePickerForm : Form
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(0, 8, 0, 0) };
         _browseBtn = new RButton
         {
-            Text = "Browse for folder...",
+            Text = "浏览文件夹…",
             Dock = DockStyle.Left,
             Width = 170,
             CornerRadius = 8,
@@ -80,7 +80,7 @@ internal sealed class GamePickerForm : Form
         };
         var cancelBtn = new RButton
         {
-            Text = "Cancel",
+            Text = "取消",
             Dock = DockStyle.Right,
             Width = 100,
             CornerRadius = 8,
@@ -119,10 +119,10 @@ internal sealed class GamePickerForm : Form
 
         _titleLabel = new Label
         {
-            Text = "Select Game",
+            Text = "选择游戏",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font("Segoe UI", 10f),
+            Font = ThemeEngine.MakeFont(10f),
         };
         _titleLabel.MouseDown += TitleBarMouseDown;
         _titleLabel.MouseMove += TitleBarMouseMove;
@@ -164,12 +164,12 @@ internal sealed class GamePickerForm : Form
         {
             var note = new Label
             {
-                Text = "No Minecraft vs Zombies 2 folder found automatically.\n"
-                     + $"Pick it manually, or set the {AppState.GameDirEnvVar} environment variable.",
+                Text = "没能自动找到《Minecraft vs Zombies 2》的目录。\n"
+                     + $"请手动选择，或设置 {AppState.GameDirEnvVar} 环境变量。",
                 AutoSize = false,
                 Width = _rows.ClientSize.Width - 24,
                 Height = 52,
-                Font = new Font("Segoe UI", 8.5f),
+                Font = ThemeEngine.MakeFont(8.5f),
                 TextAlign = ContentAlignment.MiddleLeft,
             };
             note.Tag = "subtext";
@@ -206,7 +206,7 @@ internal sealed class GamePickerForm : Form
             Text = title,
             Dock = DockStyle.Top,
             Height = 22,
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+            Font = ThemeEngine.MakeFont(10f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
             Cursor = Cursors.Hand,
@@ -215,7 +215,7 @@ internal sealed class GamePickerForm : Form
         {
             Text = subtitle,
             Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 8f),
+            Font = ThemeEngine.MakeFont(8f),
             TextAlign = ContentAlignment.TopLeft,
             AutoEllipsis = true,
             Cursor = Cursors.Hand,
@@ -239,7 +239,7 @@ internal sealed class GamePickerForm : Form
     {
         using var dlg = new FolderBrowserDialog
         {
-            Description = "Pick the Minecraft vs Zombies 2 root folder",
+            Description = "选择《Minecraft vs Zombies 2》的根目录",
             UseDescriptionForTitle = true,
             ShowNewFolderButton = false,
         };
@@ -266,18 +266,18 @@ internal sealed class GamePickerForm : Form
         if (exe == null)
         {
             MessageBox.Show(this,
-                "No MinecraftVSZombies2.exe found in:\n" + dir +
-                "\n\nPick the game's root folder (the one next to MinecraftVSZombies2_Data).",
-                "Not the game folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                "这个目录里没有 MinecraftVSZombies2.exe：\n" + dir +
+                "\n\n请选择游戏根目录（也就是 MinecraftVSZombies2_Data 所在的那一层）。",
+                "不是游戏目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         if (!AppState.IsValidGameDir(dir))
         {
             MessageBox.Show(this,
-                "Found the executable, but the folder is missing MinecraftVSZombies2_Data:\n" + dir +
-                "\n\nThis doesn't look like a Minecraft vs Zombies 2 install.",
-                "Not the game folder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                "找到了 exe，但这个目录里缺少 MinecraftVSZombies2_Data：\n" + dir +
+                "\n\n这看起来不像是一个《Minecraft vs Zombies 2》的安装目录。",
+                "不是游戏目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 

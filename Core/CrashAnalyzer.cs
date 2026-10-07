@@ -29,7 +29,7 @@ internal static class CrashAnalyzer
             foreach (var mod in installedNames)
             {
                 if (lines[i].Contains(mod, StringComparison.OrdinalIgnoreCase))
-                    return new CrashSuspect(mod, $"\"{mod}\" appears in the stack trace near a reported error/exception. This is a best-effort guess, not a certainty.");
+                    return new CrashSuspect(mod, $"「{mod}」出现在报错/异常的堆栈附近。这只是尽力而为的猜测，并不一定准确。");
             }
         }
         return null;

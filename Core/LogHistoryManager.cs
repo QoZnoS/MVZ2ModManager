@@ -2,7 +2,7 @@ namespace MVZ2ModManager.Core;
 
 internal record LogSession(string FilePath, DateTime Timestamp)
 {
-    public string DisplayName => Timestamp.ToString("MMM d, yyyy h:mm tt");
+    public string DisplayName => Timestamp.ToString("yyyy-MM-dd HH:mm");
 }
 
 internal static class LogHistoryManager

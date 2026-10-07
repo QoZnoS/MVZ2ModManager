@@ -132,7 +132,7 @@ internal static class SaveCompatibility
             owners.TryGetValue(u.Namespace, out var owner);
             warnings.Add(new SaveWarning(
                 u.Namespace,
-                owner ?? "(not installed)",
+                owner ?? "（未安装）",
                 u.SaveCount,
                 u.VersionRange,
                 u.Samples));

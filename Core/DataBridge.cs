@@ -4,7 +4,7 @@ namespace MVZ2ModManager.Core;
 
 /// <summary>
 /// 落在「游戏目录」里的持久化数据（相对 <see cref="AppState.DataDir"/>）：
-/// 存档点（loadout）与配置快照目录。
+/// 快照点（loadout）与配置快照目录。
 ///
 /// <para>放在游戏目录而不是 <c>%APPDATA%</c> 是刻意的：换机器、换安装目录时
 /// 整套「哪套模组开着」跟着走，不用重新配。</para>
@@ -20,13 +20,13 @@ internal static class DataBridge
     public static string? LoadoutsDir => AppState.DataDir is { } d ? Path.Combine(d, "loadouts") : null;
     public static string? LoadoutsPath => LoadoutsDir is { } d ? Path.Combine(d, "loadouts.json") : null;
 
-    /// <summary>某个存档点的配置快照目录（整份 <c>BepInEx/config</c> 的副本）。</summary>
+    /// <summary>某个快照点的配置快照目录（整份 <c>BepInEx/config</c> 的副本）。</summary>
     public static string? ConfigSnapshotDir(int number) =>
         LoadoutsDir is { } d ? Path.Combine(d, "config_snapshots", number.ToString()) : null;
 
     public static bool HasDataFolder => AppState.DataDir is { } d && Directory.Exists(d);
 
-    // ------------------------------------------------------------- 存档点
+    // ------------------------------------------------------------- 快照点
 
     public static List<ModLoadout> LoadLoadouts()
     {

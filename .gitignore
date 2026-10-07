@@ -6,11 +6,12 @@ obj/
 *.csproj.user
 *.user
 
-# 上游参考快照（本目录只作对照，不参与构建）
-_sevs-mod-manager-main/
-
 # 自检报告
 _selftest.txt
+_ui-selftest.txt
+
+# 界面截图（开发用）
+screenshots/
 
 # 打包输出
 dist/
