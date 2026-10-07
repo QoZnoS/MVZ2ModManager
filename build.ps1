@@ -6,6 +6,8 @@
 #   .\build.ps1 -Pack            构建 + 打 zip 到 <仓库根>\dist\（框架依赖单文件，约 2MB）
 #   .\build.ps1 -Pack -SelfContained
 #                                免安装版（自包含单文件，约 63MB，目标机器不用装 .NET）
+#   .\build.ps1 -Exe             只输出**裸 exe** 到 <仓库根>\dist\，不打 zip
+#                                （可叠加 -SelfContained；写 -Pack -Exe 则两者都要）
 #   .\build.ps1 -Run             构建后启动
 #   .\build.ps1 -SelfTest        构建后跑无界面自检（写 _selftest.txt）
 #   .\build.ps1 -SelfTest -ApplyRoundtrip
@@ -29,6 +31,7 @@ param(
     [switch]$Release,
     [switch]$Pack,
     [switch]$SelfContained,
+    [switch]$Exe,
     [switch]$Run,
     [switch]$SelfTest,
     [switch]$ApplyRoundtrip,
@@ -43,6 +46,27 @@ $proj = Join-Path $here 'MVZ2ModManager.csproj'
 function Write-Step($m) { Write-Host ""; Write-Host ("== " + $m) -ForegroundColor White }
 function Write-Ok($m)   { Write-Host ("   " + $m) -ForegroundColor Green }
 function Write-Info($m) { Write-Host ("   " + $m) -ForegroundColor Gray }
+
+# 单文件 publish 到 $StageDir。两种模式产出的**都是单个 exe**，
+# 差别只在要不要带上 .NET 运行时（体积差 ~400 倍）。
+function Publish-OneFile($StageDir) {
+    if ($SelfContained) {
+        # 自包含单文件：目标机器不用装 .NET（~63MB 压缩后）
+        Write-Info "自包含单文件（体积大，但换机器就能跑，不需要 .NET）"
+        & dotnet publish $proj -c $config -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o $StageDir --nologo
+    }
+    else {
+        # 框架依赖单文件：~0.4MB，需要目标机器有 .NET 8 Desktop Runtime
+        Write-Info "框架依赖单文件（需要目标机器装 .NET 8 Desktop Runtime；加 -SelfContained 出免安装版）"
+        & dotnet publish $proj -c $config -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true `
+            -o $StageDir --nologo
+    }
+    if ($LASTEXITCODE -ne 0) { throw "publish 失败。" }
+    Remove-Item (Join-Path $StageDir '*.pdb') -Force -ErrorAction SilentlyContinue
+}
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw "找不到 dotnet。需要 .NET SDK 8 或更高（本工程目标 net8.0-windows）。"
@@ -67,8 +91,10 @@ if ($LASTEXITCODE -ne 0) { throw "构建失败。" }
 Write-Ok "构建完成"
 
 $outDir = Join-Path $here ("bin\" + $config + "\net8.0-windows")
-$exe = Join-Path $outDir 'MVZ2ModManager.exe'
-if (-not (Test-Path -LiteralPath $exe)) { throw ("构建产物缺失：" + $exe) }
+# 别把这个变量叫 $exe —— PowerShell 变量名大小写不敏感，
+# 它会和脚本参数 [switch]$Exe 变成同一个变量，赋值时直接抛类型转换错误。
+$builtExe = Join-Path $outDir 'MVZ2ModManager.exe'
+if (-not (Test-Path -LiteralPath $builtExe)) { throw ("构建产物缺失：" + $builtExe) }
 
 if ($SelfTest) {
     Write-Step "自检"
@@ -76,7 +102,7 @@ if ($SelfTest) {
     $args = @('--selftest', $report)
     if ($ApplyRoundtrip) { $args += '--apply-roundtrip' }
     # 这是 GUI 子系统程序：PowerShell 的 & 不会等它，$LASTEXITCODE 会是上一次的残留值。
-    $proc = Start-Process -FilePath $exe -ArgumentList $args -PassThru -Wait
+    $proc = Start-Process -FilePath $builtExe -ArgumentList $args -PassThru -Wait
     Write-Info ("报告：" + $report)
     if ($proc.ExitCode -ne 0) { Write-Host "自检未全部通过。" -ForegroundColor Yellow } else { Write-Ok "自检全部通过" }
 }
@@ -85,7 +111,7 @@ if ($UiSelfTest) {
     Write-Step "界面自检"
     $report = Join-Path $here '_ui-selftest.txt'
     # 同样必须用 Start-Process -Wait：GUI 子系统 + & 的组合不会等进程。
-    $proc = Start-Process -FilePath $exe -ArgumentList @('--ui-selftest', $report) -PassThru -Wait
+    $proc = Start-Process -FilePath $builtExe -ArgumentList @('--ui-selftest', $report) -PassThru -Wait
     Write-Info ("报告：" + $report)
     if ($proc.ExitCode -ne 0) { Write-Host "界面自检未全部通过。" -ForegroundColor Yellow } else { Write-Ok "界面自检全部通过" }
 }
@@ -93,53 +119,50 @@ if ($UiSelfTest) {
 if ($Screenshot) {
     Write-Step "界面截图"
     $shotDir = Join-Path $here 'screenshots'
-    $proc = Start-Process -FilePath $exe -ArgumentList @('--screenshot', $shotDir) -PassThru -Wait
+    $proc = Start-Process -FilePath $builtExe -ArgumentList @('--screenshot', $shotDir) -PassThru -Wait
     Write-Info ("输出目录：" + $shotDir)
     if ($proc.ExitCode -ne 0) { Write-Host "截图失败。" -ForegroundColor Yellow } else { Write-Ok "截图完成" }
 }
 
-if ($Pack) {
+if ($Pack -or $Exe) {
     Write-Step "打包"
     $dist = Join-Path (Split-Path $here -Parent) 'dist'
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
+    $base = "MVZ2ModManager_v" + $version + $(if ($SelfContained) { '_standalone' } else { '' })
 
     $stage = Join-Path $env:TEMP ('mvz2mm_pack_' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    try {
+        Publish-OneFile $stage
 
-    if ($SelfContained) {
-        # 自包含单文件：目标机器不用装 .NET（~63MB）
-        Write-Info "自包含单文件（体积大，但换机器就能跑）"
-        & dotnet publish $proj -c $config -r win-x64 --self-contained true `
-            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o $stage --nologo
+        if ($Exe) {
+            # 裸 exe：把这一个文件拷出去就能双击运行，不需要 README/LICENSE 陪着
+            $bare = Join-Path $dist ($base + '.exe')
+            Copy-Item (Join-Path $stage 'MVZ2ModManager.exe') $bare -Force
+            Write-Ok ("单体 exe：" + $bare + "  (" + [math]::Round((Get-Item $bare).Length / 1MB, 2) + " MB)")
+        }
+
+        if ($Pack) {
+            # zip 只是把说明与许可和 exe 放在一起，方便分发；exe 本身已经是单文件
+            Copy-Item (Join-Path $here 'README.md') $stage -ErrorAction SilentlyContinue
+            Copy-Item (Join-Path $here 'LICENSE.txt') $stage -ErrorAction SilentlyContinue
+
+            $zip = Join-Path $dist ($base + '.zip')
+            if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+            Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+            Write-Ok ("包体：" + $zip + "  (" + [math]::Round((Get-Item $zip).Length / 1MB, 2) + " MB)")
+        }
     }
-    else {
-        # 框架依赖单文件：~2MB，需要目标机器有 .NET 8 Desktop Runtime
-        Write-Info "框架依赖单文件（需要目标机器装 .NET 8 Desktop Runtime；加 -SelfContained 出免安装版）"
-        & dotnet publish $proj -c $config -r win-x64 --self-contained false `
-            -p:PublishSingleFile=true `
-            -o $stage --nologo
+    finally {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if ($LASTEXITCODE -ne 0) { throw "publish 失败。" }
-
-    Remove-Item (Join-Path $stage '*.pdb') -Force -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $here 'README.md') $stage -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $here 'LICENSE.txt') $stage -ErrorAction SilentlyContinue
-
-    $suffix = if ($SelfContained) { '_standalone' } else { '' }
-    $zip = Join-Path $dist ("MVZ2ModManager_v" + $version + $suffix + ".zip")
-    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
-    Remove-Item -LiteralPath $stage -Recurse -Force
-
-    Write-Ok ("包体：" + $zip + "  (" + [math]::Round((Get-Item $zip).Length / 1MB, 2) + " MB)")
 }
 
 if ($Run) {
     Write-Step "启动"
-    & $exe
+    & $builtExe
 }
 
 Write-Host ""
 Write-Ok "全部完成。"
-if (-not $Pack -and -not $Run) { Write-Info ("产物：" + $exe) }
+if (-not $Pack -and -not $Exe -and -not $Run) { Write-Info ("产物：" + $builtExe) }

@@ -19,7 +19,7 @@ internal sealed record SaveWarning(string Namespace, string Owner, int SaveCount
 /// <summary>
 /// 存档兼容性检查：读关卡存档头，判断"关掉某个模组会不会让已有存档读不进去"。
 ///
-/// <para><b>存档格式（实测 0.7.0 test-10）</b>：<c>.lvl</c> 是 <b>gzip</b>，
+/// <para><b>存档格式</b>：<c>.lvl</c> 是 <b>gzip</b>，
 /// 解开后的第一个 JSON 对象就是 <c>SerializableLevelControllerHeader</c>：</para>
 /// <code>
 /// { "_t" : "SerializableLevelControllerHeader",

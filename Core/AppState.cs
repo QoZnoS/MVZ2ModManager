@@ -13,7 +13,7 @@ namespace MVZ2ModManager.Core;
 /// </summary>
 internal static class AppState
 {
-    /// <summary>游戏主程序名（0.7.0 test-* 都是这个）。</summary>
+    /// <summary>游戏主程序名。</summary>
     public const string GameExeName = "MinecraftVSZombies2.exe";
 
     /// <summary>游戏数据目录名（用它判断一个目录是不是 MVZ2）。</summary>

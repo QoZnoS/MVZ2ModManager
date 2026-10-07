@@ -54,12 +54,16 @@ BepInEx 的插件发现就是一句 `Directory.GetFiles(plugins, "*.dll", AllDir
 ```powershell
 .\build.ps1                              # 构建（Debug）
 .\build.ps1 -Release -Run                # Release 并启动
-.\build.ps1 -Pack                        # 框架依赖单文件 → ..\dist\（需 .NET 8 Desktop Runtime）
-.\build.ps1 -Pack -SelfContained         # 免安装单文件 → ..\dist\
+.\build.ps1 -Exe                         # 裸单个 exe → ..\dist\（0.4MB，需 .NET 8 Desktop Runtime）
+.\build.ps1 -Exe -SelfContained          # 免安装裸 exe → ..\dist\（约 165MB，目标机器不用装 .NET）
+.\build.ps1 -Pack                        # 与 -Exe 叠加再套一层 zip（附带 README / LICENSE，便于分发）
 .\build.ps1 -SelfTest -ApplyRoundtrip    # 核心自检（元数据 / 依赖 / 存档 / 模组包）
 .\build.ps1 -UiSelfTest                  # 界面自检（真的构造所有窗体并切一遍标签页）
 .\build.ps1 -Screenshot                  # 每个标签页一张 PNG + 控件树，核对版面用
 ```
+
+> **产物本身就是单个 exe。** publish 用的是 `PublishSingleFile`，所以那一个文件拷到哪里都能双击运行，
+> 不需要 README / LICENSE 或者其它 dll 陪着；zip 只是为了把说明与许可一起分发才额外打的。
 
 > 直接跑 `.ps1` 被 ExecutionPolicy 挡住时，用
 > `powershell -ExecutionPolicy Bypass -File .\build.ps1 ...`
