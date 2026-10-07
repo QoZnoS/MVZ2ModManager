@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MVZ2ModManager.Core;
 
 /// <summary>磁盘上的一个已安装模组（<c>.dll</c> = 启用，<c>.dll.disabled</c> = 禁用）。</summary>
@@ -74,14 +76,47 @@ internal class ModpackInfo
 }
 
 internal enum ThemeMode { Black, White, Custom, R2Modman }
-
 internal enum GamePickerDisplay { Both, Text, Icons }
+
+/// <summary>
+/// 一套登记过的游戏安装。
+///
+/// <para>MVZ2 的每个版本都是一个**独立完整的安装目录**（自己的 exe、自己的
+/// <c>BepInEx</c>、自己的资源），所以在这套工具里"多版本"就等于"多安装" ——
+/// 不需要给版本号造概念，只要记住"哪几个目录是 MVZ2"就行。</para>
+/// </summary>
+internal class GameInstallation
+{
+    /// <summary>主程序完整路径。它同时就是身份标识（比较时忽略大小写）。</summary>
+    public string ExePath = "";
+
+    /// <summary>显示名；留空就用目录名。</summary>
+    public string Alias = "";
+
+    // 下面三个都是从 ExePath 算出来的：标记 JsonIgnore，否则会被写进 state.json，
+    // 而且读回来还是过期值（只读属性反序列化时会被忽略，看着像 bug）。
+
+    [JsonIgnore] public string Directory => Path.GetDirectoryName(ExePath) ?? ExePath;
+
+    /// <summary>界面上显示的名字：别名优先，否则目录名（用户给版本目录起的名通常已经很清楚）。</summary>
+    [JsonIgnore]
+    public string DisplayName =>
+        !string.IsNullOrWhiteSpace(Alias) ? Alias : Path.GetFileName(Directory);
+
+    [JsonIgnore] public bool Exists => ExePath.Length > 0 && File.Exists(ExePath);
+}
 
 internal class AppSettings
 {
     /// <summary>游戏主程序（<c>MinecraftVSZombies2.exe</c>）的完整路径。</summary>
     public string GamePath = "";
     public string GameName = "Minecraft vs Zombies 2";
+
+    /// <summary>
+    /// 已登记的游戏安装（同一游戏的不同版本各算一个）。
+    /// <see cref="GamePath"/> 指向其中一套；换版本就是换 <see cref="GamePath"/>。
+    /// </summary>
+    public List<GameInstallation> Installations = new();
 
     public ThemeMode Theme = ThemeMode.Black;
     public string CustomBackground = "#141414";

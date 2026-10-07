@@ -32,7 +32,8 @@ BepInEx 的插件发现就是一句 `Directory.GetFiles(plugins, "*.dll", AllDir
 | **快照点**          | 把"当前哪些 mod 开着"存成快照，随时切回去 —— 连`BepInEx/config` 一起快照、一起还原。                                                                                                                                |
 | **模组包**          | 把插件 + 配置 + 资源整包导出成`.mvz2pack`，双击导入。只覆盖模组自己的目录，**绝不碰 `core/` `interop/` `patchers/`**。                                                                                                |
 | **日志 / 问题报告** | 实时跟随 BepInEx 日志、归档最近 10 次、从崩溃堆栈里猜元凶、一键导出 zip 报告。                                                                                                                                        |
-| **总开关**          | 设置页一键把`winhttp.dll` 改名 —— 唯一"全部关掉且完全可逆"的手段。                                                                                                                                                  |
+| **多版本管理** | 一个管理器同时管多套 MVZ2 安装（每个版本都是一套独立安装）。标题栏点游戏名即可切换，切换时整套面板重新加载 —— 不会拿着上一个版本的模组列表糊弄你。 |
+| **总开关** | 设置页一键把 `winhttp.dll` 改名 —— 唯一"全部关掉且完全可逆"的手段。 |
 
 界面为中文，**零第三方依赖**（只用 .NET 8 自带的东西）。
 
@@ -41,6 +42,12 @@ BepInEx 的插件发现就是一句 `Directory.GetFiles(plugins, "*.dll", AllDir
 ## 如何使用
 
 - 点列表里的复选框开关 mod。**改开关前请先关掉游戏**（插件 DLL 被锁住）。
+- **手上有好几个版本？** 点标题栏右上角的游戏名 —— 菜单里挨个列着已登记的安装，点一下就切过去。
+  要批量加，走菜单里的「添加 / 管理安装…」→「扫描父目录…」，选一次父目录
+  （比如 `E:\Game\PVZ\MVZ2`），里面每一套都会被收进来；认的是 `MinecraftVSZombies2_Data`，
+  GameMaker 引擎那类没有它的版本会自动落选。
+- **关掉总开关之后照样能启动游戏**：点「▶ 启动游戏」会确认一次「要在不启用模组的情况下开始游戏吗」，
+  答"是"就以原版方式启动。管理器**不会**在这时候偷偷帮你把 BepInEx 打开 —— 重新打开是设置页总开关的事。
 - 禁用 / 卸载前会弹确认框，列出"会被连带弄坏的插件"和"会读不进去的存档（含文件名）"。
 - 直接把 `.dll` 拖进窗口就能装；卸载时单独问一次要不要连 `StreamingAssets/Mods/<命名空间>/` 一起清掉。
 - 首次运行会有一段底部教练卡带你走一遍六个标签页。
@@ -59,7 +66,7 @@ BepInEx 的插件发现就是一句 `Directory.GetFiles(plugins, "*.dll", AllDir
 .\build.ps1 -Pack                        # 与 -Exe 叠加再套一层 zip（附带 README / LICENSE，便于分发）
 .\build.ps1 -SelfTest -ApplyRoundtrip    # 核心自检（元数据 / 依赖 / 存档 / 模组包）
 .\build.ps1 -UiSelfTest                  # 界面自检（真的构造所有窗体并切一遍标签页）
-.\build.ps1 -Screenshot                  # 每个标签页一张 PNG + 控件树，核对版面用
+.\build.ps1 -Screenshot                  # 每个标签页一张 PNG（内容超高的再多拍一张滚到底的）+ 控件树
 ```
 
 > **产物本身就是单个 exe。** publish 用的是 `PublishSingleFile`，所以那一个文件拷到哪里都能双击运行，
@@ -84,7 +91,7 @@ BepInEx 的插件发现就是一句 `Directory.GetFiles(plugins, "*.dll", AllDir
 
 | 位置                                            | 内容                                           |
 | ----------------------------------------------- | ---------------------------------------------- |
-| `%APPDATA%\MVZ2ModManager\state.json`           | 本程序的偏好：游戏路径、主题、是否提醒存档风险 |
+| `%APPDATA%\MVZ2ModManager\state.json` | 游戏安装列表与当前选择、主题、是否提醒存档风险 |
 | `%APPDATA%\MVZ2ModManager\Modpacks\mvz2\`       | 自建模组包（`.mvz2pack`）                      |
 | `<游戏目录>\BepInEx\MVZ2ModManager\loadouts\`   | 快照点 +`config_snapshots\<n>\`                |
 | `<游戏目录>\BepInEx\MVZ2ModManager\LogHistory\` | 最近 10 次日志归档                             |

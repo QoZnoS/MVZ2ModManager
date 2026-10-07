@@ -36,7 +36,7 @@ internal sealed class GamePickerForm : Form
         Icon = AppIcons.Icon;
         StartPosition = FormStartPosition.CenterScreen;
         DoubleBuffered = true;
-        Text = "选择游戏";
+        Text = "游戏安装";
         FormBorderStyle = FormBorderStyle.None;
         ClientSize = new Size(520, 430);
 
@@ -50,7 +50,7 @@ internal sealed class GamePickerForm : Form
 
         var heading = new Label
         {
-            Text = "《Minecraft vs Zombies 2》装在哪里？",
+            Text = "选择游戏安装",
             Dock = DockStyle.Top,
             Height = 28,
             Font = ThemeEngine.MakeFont(11.5f, FontStyle.Bold),
@@ -59,8 +59,8 @@ internal sealed class GamePickerForm : Form
 
         _hint = new Label
         {
-            Text = "请选择游戏根目录（也就是含有 MinecraftVSZombies2.exe "
-                 + "和 MinecraftVSZombies2_Data 的那一层）。",
+            Text = "每个 MVZ2 版本都是一套独立安装（各有自己的 MinecraftVSZombies2_Data）。"
+                 + "点一行就切过去；还没登记的话用「扫描父目录…」把一整包版本收进来。",
             Dock = DockStyle.Top,
             Height = 46,
             Font = ThemeEngine.MakeFont(8.5f),
@@ -72,10 +72,19 @@ internal sealed class GamePickerForm : Form
         _browseBtn = new RButton
         {
             Text = "浏览文件夹…",
-            Dock = DockStyle.Left,
-            Width = 170,
+            AutoSize = true,
+            Padding = new Padding(14, 0, 14, 0),
             CornerRadius = 8,
             Tag = "accent",
+            Cursor = Cursors.Hand,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        var scanBtn = new RButton
+        {
+            Text = "扫描父目录…",
+            AutoSize = true,
+            Padding = new Padding(14, 0, 14, 0),
+            CornerRadius = 8,
             Cursor = Cursors.Hand,
         };
         var cancelBtn = new RButton
@@ -86,11 +95,28 @@ internal sealed class GamePickerForm : Form
             CornerRadius = 8,
             Cursor = Cursors.Hand,
         };
+
+        // 两个左对齐按钮放进 FlowLayoutPanel —— 直接给它们都设 Dock=Left 的话，
+        // 谁在外侧取决于 z 序，读代码根本看不出来。
+        var leftFlow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Left,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 4, 0, 0),
+            Margin = Padding.Empty,
+        };
+        leftFlow.Controls.Add(_browseBtn);
+        leftFlow.Controls.Add(scanBtn);
+
         _browseBtn.Click += (_, __) => BrowseForFolder();
+        scanBtn.Click += (_, __) => ScanParentFolder();
         cancelBtn.Click += (_, __) => { Confirmed = false; Close(); };
 
+        bottom.Controls.Add(leftFlow);
         bottom.Controls.Add(cancelBtn);
-        bottom.Controls.Add(_browseBtn);
 
         _rows = new FlowLayoutPanel
         {
@@ -119,7 +145,7 @@ internal sealed class GamePickerForm : Form
 
         _titleLabel = new Label
         {
-            Text = "选择游戏",
+            Text = "游戏安装",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Font = ThemeEngine.MakeFont(10f),
@@ -149,45 +175,83 @@ internal sealed class GamePickerForm : Form
     {
         _rows.Controls.Clear();
 
-        // 1) 认出来的 MVZ2（环境变量 / 历史 / 上次选择）
-        string? remembered = null;
-        if (AppState.Settings.KnownGamePaths.TryGetValue(AppState.Presets[0].Name, out var known) && File.Exists(known))
-            remembered = known;
-        remembered ??= AutoDetect();
+        var installs = AppState.Installations;
 
-        if (remembered != null && File.Exists(remembered) && AppState.IsValidGameDir(Path.GetDirectoryName(remembered)))
-        {
-            var path = remembered;
-            AddRow(AppState.Settings.GameName, Path.GetDirectoryName(path)!, () => Commit(path), accent: true);
-        }
-        else
+        if (installs.Count == 0)
         {
             var note = new Label
             {
-                Text = "没能自动找到《Minecraft vs Zombies 2》的目录。\n"
-                     + $"请手动选择，或设置 {AppState.GameDirEnvVar} 环境变量。",
+                Text = "还没登记过任何游戏目录。\n"
+                     + "用「扫描父目录…」选一个装着各版本的文件夹（里面每个 MVZ2 目录都会被收进来），"
+                     + "或者用「浏览文件夹…」单独选一套。",
                 AutoSize = false,
-                Width = _rows.ClientSize.Width - 24,
-                Height = 52,
+                Width = Math.Max(240, _rows.ClientSize.Width - 24),
+                Height = 64,
                 Font = ThemeEngine.MakeFont(8.5f),
                 TextAlign = ContentAlignment.MiddleLeft,
             };
             note.Tag = "subtext";
             _rows.Controls.Add(note);
+            return;
         }
 
-        // 2) 用户自己加过的其它目录
-        foreach (var (name, path) in AppState.Settings.CustomGames)
+        // 一行一套安装 —— 同一游戏的不同版本在这里就是一视同仁的"安装"。
+        var current = AppState.CurrentInstallation;
+        foreach (var inst in installs)
         {
-            if (!File.Exists(path)) continue;
-            var p = path;
-            AddRow(name, Path.GetDirectoryName(p) ?? p, () => Commit(p));
+            bool isCurrent = ReferenceEquals(inst, current);
+            string subtitle = inst.Directory
+                            + (isCurrent ? "　· 当前" : "")
+                            + (inst.Exists ? "" : "　· 找不到");
+
+            var target = inst;
+            AddRow(target.DisplayName, subtitle, () => Commit(target.ExePath),
+                accent: isCurrent, enabled: target.Exists);
         }
     }
 
-    private void AddRow(string title, string subtitle, Action onClick, bool accent = false)
+    /// <summary>
+    /// 让用户指一个"装着各版本的文件夹"，把扫到的安装一次全登记进来。
+    /// 例：<c>E:\Game\PVZ\MVZ2</c> 下面是 0.5.0 / 0.6.0 / 0.7.0 test-1 / test-4 … 十几套。
+    /// </summary>
+    private void ScanParentFolder()
+    {
+        using var dlg = new FolderBrowserDialog
+        {
+            Description = "选择装着各版本 MVZ2 的文件夹（会扫描它下面两层）",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+        };
+
+        string start = AppState.GameDir is { } dir ? Path.GetDirectoryName(dir) ?? dir : "";
+        if (start.Length > 0 && Directory.Exists(start)) dlg.SelectedPath = start;
+
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        var found = AppState.ScanForInstallations(dlg.SelectedPath);
+        if (found.Count == 0)
+        {
+            MessageBox.Show(this,
+                "这个文件夹下面没找到 MVZ2 安装。\n\n"
+                + "认的是 MinecraftVSZombies2_Data 目录 —— 也正是靠它排除 GameMaker 那些版本。\n\n"
+                + dlg.SelectedPath,
+                "没找到 MVZ2", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        int added = found.Count(exe => AppState.Find(exe) == null && AppState.Remember(exe) != null);
+        AppState.Save();
+        BuildRows();
+
+        _hint.Text = added == found.Count
+            ? $"扫到 {found.Count} 套安装，已全部登记 —— 点一行就切过去。"
+            : $"扫到 {found.Count} 套安装，其中新登记 {added} 套 —— 点一行就切过去。";
+    }
+
+    private void AddRow(string title, string subtitle, Action onClick, bool accent = false, bool enabled = true)
     {
         int width = Math.Max(200, (_rows.ClientSize.Width > 0 ? _rows.ClientSize.Width : ClientSize.Width - 48) - 24);
+        var cursor = enabled ? Cursors.Hand : Cursors.Default;
 
         var row = new RPanel
         {
@@ -197,7 +261,7 @@ internal sealed class GamePickerForm : Form
             Padding = new Padding(12, 6, 12, 6),
             Margin = new Padding(0, 0, 0, 6),
             Corners = Corners.All,
-            Cursor = Cursors.Hand,
+            Cursor = cursor,
         };
         row.Tag = accent ? "accentrow" : "row";
 
@@ -209,7 +273,7 @@ internal sealed class GamePickerForm : Form
             Font = ThemeEngine.MakeFont(10f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleLeft,
             AutoEllipsis = true,
-            Cursor = Cursors.Hand,
+            Cursor = cursor,
         };
         var pathLbl = new Label
         {
@@ -218,17 +282,20 @@ internal sealed class GamePickerForm : Form
             Font = ThemeEngine.MakeFont(8f),
             TextAlign = ContentAlignment.TopLeft,
             AutoEllipsis = true,
-            Cursor = Cursors.Hand,
+            Cursor = cursor,
             Tag = "subtext",
         };
 
         row.Controls.Add(pathLbl);
         row.Controls.Add(nameLbl);
 
-        void Click(object? s, EventArgs e) => onClick();
-        row.Click += Click;
-        nameLbl.Click += Click;
-        pathLbl.Click += Click;
+        if (enabled)
+        {
+            void Click(object? s, EventArgs e) => onClick();
+            row.Click += Click;
+            nameLbl.Click += Click;
+            pathLbl.Click += Click;
+        }
 
         _rows.Controls.Add(row);
     }
@@ -288,10 +355,14 @@ internal sealed class GamePickerForm : Form
 
     private void Commit(string exePath)
     {
-        AppState.Settings.GamePath = exePath;
-        AppState.Settings.GameName = AppState.Presets[0].Name;
-        AppState.Settings.KnownGamePaths[AppState.Presets[0].Name] = exePath;
-        AppState.Save();
+        if (!AppState.SwitchTo(exePath))
+        {
+            MessageBox.Show(this,
+                "这套安装现在用不了 —— 主程序或 MinecraftVSZombies2_Data 不见了。",
+                "打不开", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            BuildRows();
+            return;
+        }
 
         AppState.EnsureDataDir();
         Confirmed = true;

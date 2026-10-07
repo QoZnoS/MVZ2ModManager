@@ -62,8 +62,208 @@ internal static class SelfTest
         }
 
         sb.AppendLine($"BepInEx 是否已安装：{BepInExManager.IsInstalled(gameDir)}");
+        sb.AppendLine($"BepInEx 状态      ：{BepInExManager.GetState(gameDir)}");
         sb.AppendLine($"模组总开关       ：{BepInExManager.ModsEnabled(gameDir)}");
         sb.AppendLine($"进程名           ：{AppState.GameProcessName}");
+        sb.AppendLine();
+
+        // ---------------------------------------------------------- BepInEx 状态判定
+        // 在临时目录里合成四种环境。它们全都是"不加载模组"，但含义与出路完全不同：
+        // 没装 → 没得救；注入器丢了 → 得自己补文件；被改名 → 设置页能一键恢复。
+        sb.AppendLine("--- BepInEx 状态判定 ---");
+        try
+        {
+            string sandbox = Path.Combine(Path.GetTempPath(), "mvz2mm_state_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(sandbox);
+
+            string Synth(string name, bool bepDir, bool winhttp, bool renamed)
+            {
+                string dir = Path.Combine(sandbox, name);
+                Directory.CreateDirectory(dir);
+                if (bepDir) Directory.CreateDirectory(Path.Combine(dir, "BepInEx"));
+                if (winhttp) File.WriteAllText(Path.Combine(dir, "winhttp.dll"), "stub");
+                if (renamed) File.WriteAllText(Path.Combine(dir, "winhttp.dll.disabled"), "stub");
+                return dir;
+            }
+
+            var cases = new[]
+            {
+                (Name: "没装 BepInEx",      Dir: Synth("none", false, false, false), Expect: BepInExState.NotInstalled,    Toggle: false),
+                (Name: "装了但注入器丢了",   Dir: Synth("lost", true,  false, false), Expect: BepInExState.InjectorMissing, Toggle: false),
+                (Name: "装了且被关闭",       Dir: Synth("off",  true,  false, true),  Expect: BepInExState.Disabled,        Toggle: true),
+                (Name: "装了且启用",         Dir: Synth("on",   true,  true,  false), Expect: BepInExState.Enabled,         Toggle: true),
+            };
+
+            foreach (var c in cases)
+            {
+                var actual = BepInExManager.GetState(c.Dir);
+                Check($"[状态] {c.Name} 判定为 {c.Expect}", actual == c.Expect, $"实际 = {actual}");
+
+                Check($"[状态] {c.Name} → 总开关可用 = {c.Toggle}",
+                    BepInExManager.CanToggle(c.Dir) == c.Toggle, "");
+
+                // 只有"启用中"不该被打断，其余三种都必须先问一句这次是不带模组启动。
+                bool prompts = BepInExManager.LaunchPrompt(c.Expect) is not null;
+                Check($"[启动] {c.Name} → {(c.Expect == BepInExState.Enabled ? "直接启动" : "先弹确认")}",
+                    prompts == (c.Expect != BepInExState.Enabled), "");
+            }
+
+            // 这条是这次改动的核心：关闭模组时问的必须变成"要不要不带模组启动"，
+            // 而不是"要不要帮你重新打开" —— 后者答"否"会把启动游戏本身也取消掉。
+            string? offPrompt = BepInExManager.LaunchPrompt(BepInExState.Disabled)?.Text;
+            Check("[启动] 关闭状态问的是「在不启用模组的情况下开始游戏」",
+                offPrompt is not null && offPrompt.Contains("不启用模组") && !offPrompt.Contains("重新打开"),
+                offPrompt ?? "(null)");
+
+            // 没装 BepInEx 的文案里不能出现"改名"，否则用户会去翻一个从没被人动过的文件。
+            string? notInstalledNote = BepInExManager.Describe(BepInExState.NotInstalled);
+            Check("[状态] 没装 BepInEx 时不再说成 winhttp.dll 被改名",
+                notInstalledNote is not null
+                && notInstalledNote.Contains("未安装") && !notInstalledNote.Contains("改名"),
+                notInstalledNote ?? "(null)");
+
+            Check("[状态] 一切正常时状态栏不多塞一句话",
+                BepInExManager.Describe(BepInExState.Enabled) is null, "");
+
+            // 「启动游戏」的决策。以前这里把"要不要重新打开 BepInEx"和"要不要启动游戏"
+            // 揉成一句话，用户答"否"之后游戏根本没启动 —— 也就是没法用管理器启动原版游戏。
+            {
+                bool askUsed = false;
+                bool okWhenEnabled = GameLauncher.ShouldStart(BepInExState.Enabled,
+                    _ => { askUsed = true; return true; });
+                Check("[启动] 模组开着时不问，直接进入启动",
+                    okWhenEnabled && !askUsed, askUsed ? "居然弹了确认" : "");
+
+                var asked = new List<string>();
+                bool proceed = GameLauncher.ShouldStart(BepInExState.Disabled,
+                    p => { asked.Add(p.Text); return true; });
+                Check("[启动] 模组关着时问一次，答「是」就照常启动（不回头去动总开关）",
+                    proceed && asked.Count == 1, $"问了 {asked.Count} 次");
+
+                asked.Clear();
+                bool cancelled = GameLauncher.ShouldStart(BepInExState.Disabled,
+                    p => { asked.Add(p.Text); return false; });
+                Check("[启动] 只有答「否」才是不启动", !cancelled && asked.Count == 1, "");
+
+                string? started = null;
+                GameLauncher.Start(@"C:\nonexistent\whatever.exe", p => started = p);
+                Check("[启动] 决定启动之后确实会去开进程",
+                    started == @"C:\nonexistent\whatever.exe", started ?? "（没有回调）");
+            }
+
+            try { Directory.Delete(sandbox, recursive: true); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Check("BepInEx 状态判定（临时目录）", false, ex.GetType().Name + ": " + ex.Message);
+        }
+        sb.AppendLine();
+
+        // ---------------------------------------------------------- 多安装（多版本）
+        // MVZ2 每个版本都是一套独立完整安装，所以"多版本"就是"多安装"。
+        sb.AppendLine("--- 多安装（多版本）---");
+        try
+        {
+            string root = Path.Combine(Path.GetTempPath(), "mvz2mm_inst_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+
+            // 造一套像样的安装：主程序 + 同名 _Data 目录。
+            string MakeInstall(string relative)
+            {
+                // GetFullPath 顺手把分隔符统一 —— 枚举出来的路径总是反斜杠形式。
+                string dir = Path.GetFullPath(Path.Combine(root, relative));
+                Directory.CreateDirectory(Path.Combine(dir, "MinecraftVSZombies2_Data"));
+                string exe = Path.Combine(dir, AppState.GameExeName);
+                File.WriteAllText(exe, "stub");
+                return exe;
+            }
+
+            string first = MakeInstall(@"MVZ2 0.7.0 test-10");
+            string second = MakeInstall(@"MVZ2 0.7.0 test-9");
+            // 深度 2：指向"装着 MVZ2 的那一层"（E:\Game\PVZ）也要找得到。
+            string nested = MakeInstall(@"上一层/MVZ2 0.6.0");
+            // 深度 3：超出扫描范围 —— 故意不找，把边界钉在这里。
+            string tooDeep = MakeInstall(@"上一层/再一层/MVZ2 0.5.0");
+
+            // GameMaker 那类版本：只有 data.win，没有 _Data。必须被排除，
+            // 而且不需要为它专门写规则 —— 认 _Data 就够了。
+            string gms2 = Path.Combine(root, "MVZ2 EX0.1.3.6");
+            Directory.CreateDirectory(gms2);
+            File.WriteAllText(Path.Combine(gms2, "data.win"), "stub");
+            File.WriteAllText(Path.Combine(gms2, "Minecraft大战僵尸2.exe"), "stub");
+
+            var found = AppState.ScanForInstallations(root);
+            Check("[多安装] 父目录扫描能找齐每一套（含隔了两层的）",
+                new[] { first, second, nested }.All(w => found.Contains(w, StringComparer.OrdinalIgnoreCase)),
+                $"扫到 {found.Count} 套：\n" + string.Join("\n", found));
+            Check("[多安装] GameMaker（只有 data.win）的版本被自动排除",
+                found.All(f => !f.Contains("EX0.1.3.6", StringComparison.OrdinalIgnoreCase)),
+                string.Join("\n", found));
+            Check("[多安装] 扫描深度就到两层（更深的不翻，免得在盘上乱跑）",
+                !found.Contains(tooDeep, StringComparer.OrdinalIgnoreCase),
+                tooDeep);
+
+            // 通配符的坑：目录里没有精确名时，要挑**与 _Data 同名**的那个，
+            // 而不是"文件最小的那个"（旧行为，会把某个调试副本当成主程序）。
+            string tricky = Path.Combine(root, "tricky");
+            Directory.CreateDirectory(Path.Combine(tricky, "MinecraftVSZombies2_new_Data"));
+            File.WriteAllText(Path.Combine(tricky, "MinecraftVSZombies2_old.exe"), new string('x', 64));
+            File.WriteAllText(Path.Combine(tricky, "MinecraftVSZombies2_new.exe"), new string('x', 256));
+            string? picked = AppState.FindGameExe(tricky);
+            Check("[多安装] 没有精确名时优先挑与 _Data 同名的 exe",
+                Path.GetFileName(picked ?? "") == "MinecraftVSZombies2_new.exe",
+                Path.GetFileName(picked ?? "(null)"));
+
+            // 登记 / 切换 / 忘掉。SwitchTo 会写 state.json，所以整段包在 try/finally 里，
+            // 结束时把设置原样放回去再存一次。
+            string savedPath = AppState.Settings.GamePath;
+            var savedList = AppState.Settings.Installations;
+            try
+            {
+                AppState.Settings.Installations = new List<GameInstallation>();
+                AppState.Settings.GamePath = "";
+
+                var i1 = AppState.Remember(first);
+                var i2 = AppState.Remember(second, "测试别名");
+
+                Check("[多安装] 登记会去重，别名用得上",
+                    i1 != null && i2 != null
+                    && AppState.Installations.Count == 2
+                    && ReferenceEquals(i1, AppState.Remember(first))
+                    && i2.DisplayName == "测试别名",
+                    $"共 {AppState.Installations.Count} 套：" +
+                    string.Join("、", AppState.Installations.Select(i => i.DisplayName)));
+
+                // 同一个文件从不同地方拿到时分隔符可能不同，绝不能被当成两套安装。
+                Check("[多安装] 路径比较忽略分隔符与大小写",
+                    AppState.Find(first.Replace('\\', '/')) != null
+                    && AppState.Find(first.ToUpperInvariant()) != null,
+                    first.Replace('\\', '/'));
+
+                Check("[多安装] 切换会更新当前路径，当前安装认得出来",
+                    AppState.SwitchTo(second)
+                    && AppState.Settings.GamePath == second
+                    && ReferenceEquals(AppState.CurrentInstallation, i2),
+                    AppState.Settings.GamePath);
+
+                AppState.Forget(i2!);
+                Check("[多安装] 忘掉正在用的那套时，当前选择一并清掉",
+                    AppState.Installations.Count == 1 && AppState.Settings.GamePath.Length == 0,
+                    $"剩 {AppState.Installations.Count} 套，当前 = \"{AppState.Settings.GamePath}\"");
+            }
+            finally
+            {
+                AppState.Settings.Installations = savedList;
+                AppState.Settings.GamePath = savedPath;
+                AppState.Save();
+            }
+
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Check("多安装（多版本）", false, ex.GetType().Name + ": " + ex.Message);
+        }
         sb.AppendLine();
 
         // ---------------------------------------------------------- 元数据
@@ -115,7 +315,7 @@ internal static class SelfTest
         }
 
         // ---------------------------------------------------------- 依赖分析
-        var issues = DependencyChecker.Check(mods, BepInExManager.ModsEnabled(gameDir));
+        var issues = DependencyChecker.Check(mods, BepInExManager.GetState(gameDir));
 
         sb.AppendLine("--- 依赖检查 ---");
         if (issues.Count == 0) sb.AppendLine("  （没有问题）");

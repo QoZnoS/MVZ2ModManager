@@ -53,6 +53,18 @@ internal static class ScreenshotDump
                 var tree = new List<string> { $"标签页 {tab} 的可见控件树（类型 [左,上 宽x高] 文本）", "" };
                 foreach (Control page in form.Controls) DumpTree(page, tree);
                 File.WriteAllLines(Path.Combine(outDir, $"controls-{file}.txt"), tree);
+
+                // 内容比可视区高的页再拍一张滚到底的。设置页就是这种：不滚的话
+                // 「管理器数据」「关于」根本不在图里，拿像素去量它们会量个寂寞 ——
+                // 看起来就跟"这个控件没画出来"一模一样。
+                if (ScrollBottom(form) is { } scrolled)
+                {
+                    Settle(400);
+                    log.Add($"  {scrolled.Info}");
+                    log.Add(Capture(form, Path.Combine(outDir, file + "-bottom.png"), file + "-bottom"));
+                    scrolled.Restore();
+                    Settle(200);
+                }
             }
 
             log.Add("已安装页列宽：" + form.InstalledPanelControl.ColumnWidthReport);
@@ -78,6 +90,40 @@ internal static class ScreenshotDump
             catch { /* 连日志都写不进去就没辙了 */ }
             return 1;
         }
+    }
+
+    /// <summary>
+    /// 把当前可见页里**最靠下**且内容超出可视区的滚动容器滚到底；返回一句说明与"还原"的动作。
+    /// 没有这种容器就返回 null（多数标签页都不需要）。
+    /// </summary>
+    private static (string Info, Action Restore)? ScrollBottom(Control root)
+    {
+        ScrollableControl? best = null;
+
+        void Walk(Control c)
+        {
+            if (c is ScrollableControl sc && sc.AutoScroll && sc.Visible
+                && sc.Height > 0 && sc.VerticalScroll.Maximum > sc.Height
+                && (best == null || sc.Top > best.Top))
+                best = sc;
+
+            foreach (Control child in c.Controls) Walk(child);
+        }
+
+        Walk(root);
+        if (best is not { } target) return null;
+
+        int before = target.VerticalScroll.Value;
+        target.AutoScrollPosition = new Point(0, target.VerticalScroll.Maximum);
+        target.PerformLayout();
+
+        return (
+            $"滚到底：可视 {target.Height} / 虚拟 {target.VerticalScroll.Maximum}",
+            () =>
+            {
+                target.AutoScrollPosition = new Point(0, before);
+                target.PerformLayout();
+            });
     }
 
     /// <summary>把可见控件树写进日志 —— 截图看得见"画成什么样"，看不见"某个分组有没有进版面"。</summary>

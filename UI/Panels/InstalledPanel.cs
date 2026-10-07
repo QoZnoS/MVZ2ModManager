@@ -163,7 +163,9 @@ internal sealed class InstalledPanel : UserControl
     public void Refresh_()
     {
         _mods = ModCatalog.Load();
-        _issues = DependencyChecker.Check(_mods, AppState.GameDir is { } d && BepInExManager.ModsEnabled(d));
+        _issues = DependencyChecker.Check(_mods, AppState.GameDir is { } d
+            ? BepInExManager.GetState(d)
+            : BepInExState.NotInstalled);
         FindConflicts();
 
         PopulateList();

@@ -66,6 +66,9 @@ internal static class SaveCompatibility
 
     public static bool HasAnyUserData => UserDataRoots().Any();
 
+    /// <summary>丢掉扫描缓存。换了游戏安装之后必须调一次 —— 否则会拿着上一套安装的存档结论。</summary>
+    public static void InvalidateCache() => _cache = null;
+
     /// <summary>扫描所有存档（带 30 秒缓存）。</summary>
     public static List<SaveRef> ScanAll(bool force = false)
     {

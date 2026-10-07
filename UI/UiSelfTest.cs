@@ -170,6 +170,50 @@ internal static class UiSelfTest
                 Check("主窗口状态栏刷新", false, ex.GetType().Name + ": " + ex.Message);
             }
 
+            // 标题栏那个"游戏安装"菜单：列出的必须正好是已登记的安装，当前那套打勾。
+            try
+            {
+                using var menu = form.BuildInstallMenu();
+
+                var items = menu.Items.OfType<ToolStripMenuItem>().ToArray();
+                var rows = items.Where(i => i.Text is not ("游戏安装" or "添加 / 管理安装…")).ToArray();
+
+                Check("标题栏安装菜单列出了每一套已登记安装",
+                    rows.Length == AppState.Installations.Count,
+                    $"菜单 {rows.Length} 行 / 已登记 {AppState.Installations.Count} 套"
+                    + (rows.Length > 0 ? "：" + string.Join("、", rows.Select(r => r.Text)) : ""));
+
+                int ticked = rows.Count(i => i.Checked);
+                Check("安装菜单里当前那套是唯一打勾的，并且有管理入口",
+                    ticked == (AppState.CurrentInstallation != null ? 1 : 0)
+                    && items.Any(i => i.Text == "添加 / 管理安装…" && i.Enabled),
+                    $"打勾 {ticked} 行");
+            }
+            catch (Exception ex)
+            {
+                Check("标题栏安装菜单", false, ex.GetType().Name + ": " + ex.Message);
+            }
+
+            // 换安装时会**整套重建**面板：重建之后必须还能正常切页。
+            // 这一步最容易漏接线（面板是新的，标签页/事件都挂在旧对象上）。
+            try
+            {
+                int before = form.ActiveTabIndex;
+                form.RebuildPanels();
+
+                bool keptTab = form.ActiveTabIndex == before;
+                form.SwitchToTab("设置");
+                bool canSwitch = form.ActiveTabIndex == Array.IndexOf(MainForm.TabLabels, "设置");
+
+                Check("整套重建面板之后标签页仍然正常",
+                    keptTab && canSwitch,
+                    $"重建前第 {before} 页 → 重建后第 {form.ActiveTabIndex} 页，能否切到设置页 = {canSwitch}");
+            }
+            catch (Exception ex)
+            {
+                Check("整套重建面板", false, ex.GetType().Name + ": " + ex.Message);
+            }
+
             // 列宽拖动的**接线**：算术由纯函数自检保证，这里证事件那一段真的接上了。
             try
             {
@@ -261,6 +305,49 @@ internal static class UiSelfTest
 
             Check("设置页的复选框真的写进了设置", wroteOff && wroteOn,
                 $"取消勾选后 WarnAboutSaveRisk={!wroteOff}，重新勾选后={wroteOn}");
+
+            // 关于页：作者主页 + 反馈入口。断言控件树而不是硬编码的字符串列表，
+            // 所以改文案不会让这几条变成假绿灯。
+            var aboutLinks = settings.AboutLinks;
+            var aboutUrls = aboutLinks.Select(l => l.Url).ToArray();
+
+            Check("关于页挂了作者主页与反馈入口两个链接",
+                aboutUrls.Length == 2
+                && aboutUrls.Contains(SettingsPanel.AuthorUrl)
+                && aboutUrls.Contains(SettingsPanel.FeedbackUrl),
+                $"实际 {aboutUrls.Length} 个：{string.Join("、", aboutUrls)}");
+
+            Check("关于页链接是可打开的 https 绝对地址，且是手型光标",
+                aboutLinks.Length == 2 && aboutLinks.All(l =>
+                    Uri.TryCreate(l.Url, UriKind.Absolute, out var uri)
+                    && uri.Scheme == Uri.UriSchemeHttps
+                    && l.Cursor == Cursors.Hand),
+                string.Join("、", aboutUrls));
+
+            // 配色断言必须走一遍"换主题"的真实路径（ThemeChanged → 面板自己的 ApplyTheme）。
+            // 只测构造那一刻的颜色会给出假绿灯：之后任何一次改色只要把它刷回正文色，
+            // 界面上链接就长得跟普通文字一样，而自检照样全绿。
+            //
+            // 两个坑都在这一小段里踩过：
+            //  1) 探针主题必须与"当前主题"不同，否则 Apply 只是原地踏步，断言自证成功；
+            //  2) ForeColor 必须在**探针主题生效期间**读，还原之后再读就成了拿旧主题的颜色
+            //     去比新主题的期望值 —— 在任何默认主题不是 R2Modman 的机器上都会假红。
+            var themeBefore = AppState.Settings.Theme;
+            var probeMode = themeBefore == ThemeMode.R2Modman ? ThemeMode.Black : ThemeMode.R2Modman;
+
+            ThemeEngine.Apply(probeMode);
+
+            var themedLinks = settings.AboutLinks;
+            var expectedAccent = ThemeEngine.Current.Accent;
+            var observed = themedLinks.Select(l => l.ForeColor).ToArray();
+
+            ThemeEngine.Apply(themeBefore, AppState.Settings.CustomBackground, AppState.Settings.CustomAccent);
+
+            Check("换过主题之后链接仍是强调色（没被当成普通 Label 刷掉）",
+                observed.Length == 2 && observed.All(c => c == expectedAccent),
+                observed.Length == 2
+                    ? $"{themeBefore} → {probeMode} 之后链接色 {observed[0].ToArgb():X8} / 该主题强调色 {expectedAccent.ToArgb():X8}"
+                    : "没找到链接");
 
             AppState.Settings.WarnAboutSaveRisk = original;
             AppState.Save();

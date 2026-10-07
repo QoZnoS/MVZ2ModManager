@@ -38,7 +38,11 @@ internal sealed class SettingsPanel : UserControl
         ("自定义", ThemeMode.Custom),
     };
 
-    private const string LinkRepo = "https://github.com/";
+    /// <summary>关于页的作者主页（Bilibili 空间）。</summary>
+    internal const string AuthorUrl = "https://space.bilibili.com/404359179";
+
+    /// <summary>关于页的反馈入口（GitHub Issues）。</summary>
+    internal const string FeedbackUrl = "https://github.com/QoZnoS/MVZ2ModManager/issues";
 
     public SettingsPanel()
     {
@@ -69,7 +73,9 @@ internal sealed class SettingsPanel : UserControl
         var game = AddGroup("游戏");
 
         _gamePathLabel = AddValue(game, "");
-        AddRow(game, MakeBtn("更改游戏目录…", ChangeGame), MakeBtn("打开游戏目录", OpenGameFolder));
+        AddRow(game,
+            MakeBtn("切换 / 管理安装…", ChangeGame),
+            MakeBtn("打开游戏目录", OpenGameFolder));
 
         _masterSwitch = new CheckBox
         {
@@ -140,6 +146,9 @@ internal sealed class SettingsPanel : UserControl
         var about = AddGroup("关于");
 
         _versionLabel = AddValue(about, $"MVZ2 Mod Manager v{Program.VersionString}");
+        AddRow(about,
+            new RLink("作者：QoZnoS（Bilibili）", AuthorUrl),
+            new RLink("反馈与报 bug（GitHub Issues）", FeedbackUrl));
         AddNote(about,
             "《Minecraft vs Zombies 2》(0.7.x / Windows x86 / IL2CPP / BepInEx 6) 的启动前模组管理器。\n"
             + "启用与禁用的做法是给插件 DLL 改名 — BepInEx 本身没有这个开关。\n\n"
@@ -163,10 +172,21 @@ internal sealed class SettingsPanel : UserControl
         try
         {
             var dir = AppState.GameDir;
-            _gamePathLabel.Text = dir ?? "（未选择游戏）";
+            var inst = AppState.CurrentInstallation;
+            int installCount = AppState.Installations.Count;
+
+            string gameText = dir ?? "（未选择游戏）";
+            if (dir != null)
+            {
+                if (inst is { } i) gameText = i.DisplayName + "\n" + gameText;
+                if (inst is not null && !inst.Exists) gameText += "\n⚠ 这套安装的目录已经找不到了。";
+                if (installCount > 1) gameText += $"\n已登记 {installCount} 套安装 — 换安装时整套面板会重新加载。";
+            }
+            _gamePathLabel.Text = gameText;
 
             bool hasGame = dir != null;
-            _masterSwitch.Enabled = hasGame && BepInExManager.IsInstalled(dir!);
+            // 只有装了、且注入器还在时才谈得上开关；缺少 winhttp.dll 时拨了也不会有任何效果。
+            _masterSwitch.Enabled = hasGame && BepInExManager.CanToggle(dir!);
             _masterSwitch.Checked = hasGame && BepInExManager.ModsEnabled(dir!);
 
             int themeIdx = Array.FindIndex(Themes, t => t.Mode == AppState.Settings.Theme);
@@ -185,7 +205,9 @@ internal sealed class SettingsPanel : UserControl
 
             _versionLabel.Text = $"MVZ2 Mod Manager v{Program.VersionString}";
 
-            SetStatus(dir == null ? "未选择游戏。" : (BepInExManager.IsInstalled(dir) ? "就绪。" : "游戏目录里没有找到 BepInEx 文件夹。"));
+            SetStatus(dir == null
+                ? "未选择游戏。"
+                : BepInExManager.Describe(BepInExManager.GetState(dir)) ?? "就绪。");
         }
         finally { _loading = false; }
     }
@@ -200,8 +222,9 @@ internal sealed class SettingsPanel : UserControl
         picker.ShowDialog(this);
         if (!picker.Confirmed) return;
 
-        Reload();
-        (FindForm() as MainForm)?.UpdateStatusBar();
+        // 换了安装 = 整套面板都要重建 —— 连本面板自己也会被换掉，
+        // 所以必须等当前这次消息处理完再动手，否则会在一个已经被 Dispose 的控件里继续跑。
+        if (FindForm() is MainForm main) main.BeginInvoke(main.RebuildPanels);
     }
 
     private void OpenGameFolder() => OpenInExplorer(AppState.GameDir);
@@ -442,6 +465,19 @@ internal sealed class SettingsPanel : UserControl
 
     // ------------------------------------------------------------ 主题
 
+    /// <summary>自检用：关于页上实际挂出去的链接控件（按控件树顺序）。
+    /// 只看控件树，所以改文案、调排版都不会让它失灵。</summary>
+    internal RLink[] AboutLinks => Descendants(_stack).OfType<RLink>().ToArray();
+
+    private static IEnumerable<Control> Descendants(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            yield return c;
+            foreach (Control d in Descendants(c)) yield return d;
+        }
+    }
+
     private void ApplyTheme()
     {
         var t = ThemeEngine.Current;
@@ -482,6 +518,10 @@ internal sealed class SettingsPanel : UserControl
                 case RButton rb:
                     if (rb.Tag is "accent") ThemeEngine.StyleRButton(rb, accent: true);
                     else ThemeEngine.StyleGhostButton(rb);
+                    break;
+                case RLink lk:
+                    // 必须排在 Label 之前：RLink 也是 Label，反过来就会被通用配色盖掉。
+                    lk.ApplyTheme(t);
                     break;
                 case Label lbl:
                     lbl.ForeColor = lbl.Tag is "subtext" ? t.SubText : t.Text;

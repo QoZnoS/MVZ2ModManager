@@ -38,6 +38,9 @@ internal sealed class MainForm : Form
     private readonly Panel _titleIconBox;
     private readonly Panel _titleGameIcon;
 
+    /// <summary>标题栏那个游戏名上的悬浮提示（里面是完整路径）。</summary>
+    private readonly ToolTip _tip = new();
+
     // ---- 标签条 ----
     private readonly Panel _tabStrip;
     private readonly RButton[] _navButtons;
@@ -54,14 +57,18 @@ internal sealed class MainForm : Form
     private const int StartingTimeoutSeconds = 30;
 
     // ---- 面板 ----
-    private readonly InstalledPanel _installedPanel;
-    private readonly LoadoutsPanel _loadoutsPanel;
-    private readonly ModpacksPanel _modpacksPanel;
-    private readonly ConfigPanel _configPanel;
-    private readonly LogsPanel _logsPanel;
-    private readonly SettingsPanel _settingsPanel;
-    private readonly Control[] _navPanels;
+    // 换游戏安装时整套**重建**（见 RebuildPanels），所以这里不能是 readonly。
+    private InstalledPanel _installedPanel = null!;
+    private LoadoutsPanel _loadoutsPanel = null!;
+    private ModpacksPanel _modpacksPanel = null!;
+    private ConfigPanel _configPanel = null!;
+    private LogsPanel _logsPanel = null!;
+    private SettingsPanel _settingsPanel = null!;
+    private Control[] _navPanels = Array.Empty<Control>();
     private readonly Action?[] _navActivate;
+
+    /// <summary>装面板的容器。重建面板时要往里加/取，所以留着引用。</summary>
+    private readonly Panel _contentHost;
 
     private readonly string? _pendingPackPath;
     private TutorialOverlay? _tutorial;
@@ -86,14 +93,6 @@ internal sealed class MainForm : Form
         Text = "MVZ2 Mod Manager";
         FormBorderStyle = FormBorderStyle.None;
 
-        _installedPanel = new InstalledPanel { Visible = true };
-        _loadoutsPanel = new LoadoutsPanel { Visible = false };
-        _modpacksPanel = new ModpacksPanel { Visible = false };
-        _configPanel = new ConfigPanel { Visible = false };
-        _logsPanel = new LogsPanel { Visible = false };
-        _settingsPanel = new SettingsPanel { Visible = false };
-
-        _navPanels = new Control[] { _installedPanel, _loadoutsPanel, _modpacksPanel, _configPanel, _logsPanel, _settingsPanel };
         _navActivate = new Action?[]
         {
             () => _installedPanel.Refresh_(),
@@ -104,9 +103,9 @@ internal sealed class MainForm : Form
             () => _settingsPanel.Reload(),
         };
 
-        var content = new Panel { Dock = DockStyle.Fill };
-        // Controls[0] 在最前；虽然 SwitchToIndex 里还会 BringToFront，但初始顺序也保持自然顺序。
-        foreach (var p in _navPanels) content.Controls.Add(p);
+        _contentHost = new Panel { Dock = DockStyle.Fill };
+        // 面板构造时各自会去读 AppState 里当前的安装路径 —— 所以"换安装"就是"重建面板"。
+        CreatePanels();
 
         _statusBar = new Panel { Dock = DockStyle.Bottom, Height = 24, Padding = new Padding(8, 0, 8, 0) };
         _statusLabel = new Label
@@ -119,7 +118,7 @@ internal sealed class MainForm : Form
         _statusBar.Controls.Add(_statusLabel);
         _statusBar.Controls.Add(_resizeHandle);
 
-        Controls.Add(content);
+        Controls.Add(_contentHost);
         Controls.Add(_statusBar);
 
         // ---------------- 标题栏 ----------------
@@ -179,9 +178,9 @@ internal sealed class MainForm : Form
             Cursor = Cursors.Hand,
             AutoEllipsis = true,
         };
-        _gameLabel.Click += (_, __) => SwitchGame();
+        _gameLabel.Click += (_, __) => ShowInstallMenu();
         _titleIconBox.Cursor = Cursors.Hand;
-        _titleIconBox.Click += (_, __) => SwitchGame();
+        _titleIconBox.Click += (_, __) => ShowInstallMenu();
 
         gameBox.Controls.Add(_gameLabel);
         gameBox.Controls.Add(_titleIconBox);
@@ -297,6 +296,63 @@ internal sealed class MainForm : Form
         _tutorial = null;
     }
 
+    // ------------------------------------------------------------ 面板
+
+    /// <summary>
+    /// 造一套面板并挂到 <see cref="_contentHost"/> 上。
+    /// 每个面板在构造时都会自己去读 <see cref="AppState"/> 里当前的安装路径，
+    /// 所以"换安装"就等于"重建一整套"。
+    /// </summary>
+    private void CreatePanels()
+    {
+        _installedPanel = new InstalledPanel();
+        _loadoutsPanel = new LoadoutsPanel();
+        _modpacksPanel = new ModpacksPanel();
+        _configPanel = new ConfigPanel();
+        _logsPanel = new LogsPanel();
+        _settingsPanel = new SettingsPanel();
+
+        _navPanels = new Control[]
+        {
+            _installedPanel, _loadoutsPanel, _modpacksPanel, _configPanel, _logsPanel, _settingsPanel,
+        };
+
+        // Controls[0] 在最前；虽然 SwitchToIndex 里还会 BringToFront，但初始顺序也保持自然顺序。
+        int active = Math.Clamp(_activeNavIndex, 0, _navPanels.Length - 1);
+        for (int i = 0; i < _navPanels.Length; i++)
+        {
+            _navPanels[i].Visible = i == active;
+            _contentHost.Controls.Add(_navPanels[i]);
+        }
+    }
+
+    /// <summary>
+    /// 换了游戏安装之后把面板**整套重建**。
+    ///
+    /// <para>刻意不做"逐个刷新"：面板各自还有内部缓存（存档扫描、日志路径、列宽…），
+    /// 漏掉任何一处都会让界面继续显示上一套安装的数据 ——
+    /// 最坏的结果是把模组装进错误的版本，所以这里宁可推倒重来。
+    /// 代价是几十毫秒，换来的是"不可能不一致"。</para>
+    /// </summary>
+    internal void RebuildPanels()
+    {
+        int idx = _activeNavIndex;
+        var old = _navPanels;
+
+        foreach (var p in old) _contentHost.Controls.Remove(p);
+
+        CreatePanels();
+        SwitchToIndex(idx);
+
+        foreach (var p in old) p.Dispose();
+
+        // 存档扫描有 30 秒缓存，换安装后必须作废（否则拿着上一套的结论）。
+        SaveCompatibility.InvalidateCache();
+
+        UpdateGameLabel();
+        CheckGameRunning();   // 顺手重算"这套安装的游戏在不在跑"
+    }
+
     // ------------------------------------------------------------ 状态栏
 
     /// <summary>状态栏：模组计数 + 总开关状态 + 游戏是否在跑（DLL 会被锁）。</summary>
@@ -315,8 +371,8 @@ internal sealed class MainForm : Form
             $"{disabled} 已禁用",
         };
 
-        if (!BepInExManager.ModsEnabled(gameDir))
-            parts.Add("⚠ BepInEx 已关闭（winhttp.dll 已改名）— 不会加载任何模组");
+        if (BepInExManager.Describe(BepInExManager.GetState(gameDir)) is { } bepInExNote)
+            parts.Add(bepInExNote);
 
         if (_gameRunning)
             parts.Add("⚠ 游戏正在运行 — 插件 DLL 被占用");
@@ -396,9 +452,16 @@ internal sealed class MainForm : Form
 
     private void UpdateGameLabel()
     {
-        _gameLabel.Text = AppState.Settings.GamePath.Length > 0
-            ? Path.GetDirectoryName(AppState.Settings.GamePath) ?? AppState.Settings.GameName
-            : "未选择游戏";
+        var inst = AppState.CurrentInstallation;
+
+        // 标题栏位置窄，只显示短名（别名或目录名）；完整路径挂在悬浮提示上。
+        _gameLabel.Text = inst is { } i ? i.DisplayName
+                        : AppState.Settings.GamePath.Length > 0 ? AppState.Settings.GamePath
+                        : "未选择游戏";
+
+        _tip.SetToolTip(_gameLabel, inst is { } t
+            ? t.ExePath + "\n\n点这里切换/管理已登记的游戏安装。"
+            : "点这里选择游戏目录。");
 
         bool hasGame = AppState.Settings.GamePath.Length > 0;
         _titleIconBox.Visible = hasGame;
@@ -406,22 +469,92 @@ internal sealed class MainForm : Form
         _titleGameIcon.Invalidate();
     }
 
-    private void SwitchGame()
+    // ------------------------------------------------------------ 安装（版本）切换
+
+    /// <summary>
+    /// 标题栏那个游戏名点下去弹的菜单：已登记的安装挨个列出来，打勾的是当前这套。
+    /// 做成菜单是因为"换版本"是要来回切的动作，每次都弹一个对话框太重。
+    /// </summary>
+    private void ShowInstallMenu()
     {
-        if (_gameRunning)
+        var menu = BuildInstallMenu();
+        menu.Show(_gameLabel, new Point(Math.Max(0, _gameLabel.Width - menu.Width), _gameLabel.Height));
+    }
+
+    /// <summary>菜单内容单独一个方法，这样自检能直接构造它并核对条目（不用真弹出来）。</summary>
+    internal ContextMenuStrip BuildInstallMenu()
+    {
+        var menu = new ContextMenuStrip { ShowImageMargin = false };
+
+        menu.Items.Add(new ToolStripMenuItem("游戏安装") { Enabled = false });
+        menu.Items.Add(new ToolStripSeparator());
+
+        string current = AppState.Settings.GamePath;
+        foreach (var inst in AppState.Installations)
         {
-            MessageBox.Show(this, "请先关闭游戏。", "游戏正在运行",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var item = new ToolStripMenuItem(InstallMenuText(inst))
+            {
+                Checked = AppState.Find(current) == inst,
+            };
+            if (!inst.Exists)
+            {
+                item.Enabled = false;
+                item.ToolTipText = "这个目录已经找不到了";
+            }
+            else
+            {
+                item.ToolTipText = inst.ExePath;
+                var target = inst.ExePath;
+                item.Click += (_, __) => SwitchInstallation(target);
+            }
+            menu.Items.Add(item);
+        }
+
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("添加 / 管理安装…", null, (_, __) => SwitchGame()));
+
+        // 条目加完再上色（StyleMenu 只给"已经存在"的条目逐个上色）。
+        ThemeEngine.StyleMenu(menu);
+
+        return menu;
+    }
+
+    private static string InstallMenuText(GameInstallation inst)
+    {
+        string name = inst.DisplayName;
+        // 两套安装的目录名可能一样（比如从压缩包解出来的两份），加上父目录名区分。
+        string parent = Path.GetFileName(Path.GetDirectoryName(inst.Directory) ?? "");
+        if (parent.Length > 0 && AppState.Installations.Count(i => i.DisplayName == name) > 1)
+            name = parent + "\\" + name;
+
+        return inst.Exists ? name : name + "（找不到）";
+    }
+
+    /// <summary>切换当前安装。只改设置、不动文件，所以随时能换回来。</summary>
+    private void SwitchInstallation(string exePath)
+    {
+        if (string.Equals(exePath, AppState.Settings.GamePath, StringComparison.OrdinalIgnoreCase)) return;
+
+        if (!AppState.SwitchTo(exePath))
+        {
+            MessageBox.Show(this,
+                "这套安装现在不能用 —— 里面的 MinecraftVSZombies2_Data 或主程序不见了。",
+                "打不开", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
+        RebuildPanels();
+    }
+
+    private void SwitchGame()
+    {
+        // 不再要求"先退出游戏"：进程是按完整路径认的，换到另一套安装既不会误判、
+        // 也不会误杀正在跑的那个版本，而切换本身只是改一个设置项。
         using var picker = new GamePickerForm();
         picker.ShowDialog(this);
         if (!picker.Confirmed) return;
 
-        UpdateGameLabel();
-        _navActivate[_activeNavIndex]?.Invoke();
-        UpdateStatusBar();
+        RebuildPanels();
     }
 
     // ------------------------------------------------------------ 启动 / 停止
@@ -445,6 +578,12 @@ internal sealed class MainForm : Form
         else LaunchGame();
     }
 
+    /// <summary>启动前的确认弹窗。决策逻辑在 <see cref="GameLauncher.ShouldStart"/> 里，
+    /// 这里只管"怎么问"。</summary>
+    private bool AskBeforeLaunch((string Text, string Caption, bool Warning) prompt) =>
+        MessageBox.Show(this, prompt.Text, prompt.Caption, MessageBoxButtons.YesNo,
+            prompt.Warning ? MessageBoxIcon.Warning : MessageBoxIcon.Information) == DialogResult.Yes;
+
     private void LaunchGame()
     {
         string path = AppState.Settings.GamePath;
@@ -453,40 +592,18 @@ internal sealed class MainForm : Form
         var gameDir = AppState.GameDir;
         if (gameDir == null) return;
 
-        // 总开关关着就直接提醒 —— 否则用户会以为模组坏了。
-        if (!BepInExManager.ModsEnabled(gameDir))
-        {
-            string question = BepInExManager.HasDisabledMarker(gameDir)
-                ? "BepInEx 目前处于关闭状态（winhttp.dll.disabled）。\n\n要重新打开并启动游戏吗？"
-                : "没有找到 winhttp.dll，BepInEx 不会加载任何模组。\n\n仍然启动游戏吗？";
-
-            if (BepInExManager.HasDisabledMarker(gameDir))
-            {
-                if (MessageBox.Show(this, question, "BepInEx 已关闭",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-                    return;
-                try { BepInExManager.ToggleMods(gameDir); }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, "重新启用 BepInEx 失败：" + ex.Message, "错误",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-            }
-            else if (MessageBox.Show(this, question, "缺少 BepInEx",
-                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-            {
-                return;
-            }
-        }
+        // 模组没开就先说清楚这次启动是什么状态。
+        //
+        // 注意这里**绝不替用户改总开关**：以前那版把"要不要重新打开 BepInEx"
+        // 和"要不要启动游戏"问成一句话，答"否"之后两件事都没发生 ——
+        // 于是"用管理器启动一次原版游戏"这条唯一的路被自己的弹窗堵死了。
+        // 现在问的是"要不要在不启用模组的情况下开始游戏"，答"是"就照原样启动。
+        if (!GameLauncher.ShouldStart(BepInExManager.GetState(gameDir), AskBeforeLaunch))
+            return;
 
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
-            {
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(path),
-            });
+            GameLauncher.Start(path);
 
             _launchedAt = DateTime.UtcNow;
             _starting = true;
@@ -504,11 +621,14 @@ internal sealed class MainForm : Form
 
     private void StopGame()
     {
-        string? procName = AppState.GameProcessName;
-        if (string.IsNullOrEmpty(procName)) return;
-
-        foreach (var p in System.Diagnostics.Process.GetProcessesByName(procName))
-            try { p.Kill(); } catch { }
+        // 只结束**当前这套安装**的进程：所有版本的 exe 同名，
+        // 按名字杀会连带弄掉你正在玩的另一个版本。
+        foreach (var p in AppState.RunningGameProcesses())
+        {
+            try { p.Kill(); }
+            catch { }
+            finally { p.Dispose(); }
+        }
     }
 
     private void CheckGameRunning()
@@ -543,13 +663,8 @@ internal sealed class MainForm : Form
         UpdateStatusBar();
     }
 
-    private static bool IsGameProcessRunning()
-    {
-        string? procName = AppState.GameProcessName;
-        if (string.IsNullOrEmpty(procName)) return false;
-        try { return System.Diagnostics.Process.GetProcessesByName(procName).Length > 0; }
-        catch { return false; }
-    }
+    /// <summary>当前这套安装的游戏在不在跑。按**完整路径**匹配，见 <see cref="AppState.RunningGameProcesses"/>。</summary>
+    private static bool IsGameProcessRunning() => AppState.IsGameRunning();
 
     private void UpdatePlayButton()
     {

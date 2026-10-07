@@ -29,15 +29,31 @@ internal sealed record ModIssue(IssueLevel Level, string Message, string? ModNam
 /// </summary>
 internal static class DependencyChecker
 {
-    public static List<ModIssue> Check(IReadOnlyList<InstalledMod> mods, bool bepInExOn)
+    public static List<ModIssue> Check(IReadOnlyList<InstalledMod> mods, BepInExState bepInEx)
     {
         var issues = new List<ModIssue>();
 
-        if (!bepInExOn)
+        // 「没装」「注入器丢了」「被改名」是三件不同的事，别混成一句话 ——
+        // 没装 BepInEx 的人看到"winhttp.dll 被改名"会一头雾水（他的 winhttp.dll 从来没被动过）。
+        switch (bepInEx)
         {
-            issues.Add(new ModIssue(IssueLevel.Error,
-                "BepInEx 已被关闭（winhttp.dll 被改名）。在重新打开之前不会加载任何模组。",
-                null));
+            case BepInExState.Disabled:
+                issues.Add(new ModIssue(IssueLevel.Error,
+                    "BepInEx 已被关闭（winhttp.dll 被改名）。在重新打开之前不会加载任何模组。",
+                    null));
+                break;
+
+            case BepInExState.InjectorMissing:
+                issues.Add(new ModIssue(IssueLevel.Error,
+                    "BepInEx 已安装，但缺少注入器 winhttp.dll —— 在把这个文件放回去之前不会加载任何模组。",
+                    null));
+                break;
+
+            case BepInExState.NotInstalled:
+                issues.Add(new ModIssue(IssueLevel.Info,
+                    "这个游戏目录里没有装 BepInEx —— 目前没有任何模组加载器，游戏只会以原版方式启动。",
+                    null));
+                break;
         }
 
         // GUID → 模组。同一 GUID 出现多次要单独报（典型的"old + new 两份 dll 并存"）。

@@ -124,13 +124,9 @@ internal sealed class LogsPanel : UserControl
         _wasRunning = running;
     }
 
-    private static bool IsGameRunning()
-    {
-        string procName = Path.GetFileNameWithoutExtension(AppState.Settings.GamePath);
-        if (procName.Length == 0) return false;
-        try { return System.Diagnostics.Process.GetProcessesByName(procName).Length > 0; }
-        catch { return false; }
-    }
+    /// <summary>当前这套安装的游戏在不在跑。按**完整路径**匹配 ——
+    /// 所有版本的 exe 同名，只按名字匹配会误判成"别的版本在跑"。</summary>
+    private static bool IsGameRunning() => AppState.IsGameRunning();
 
     /// <summary>
     /// BepInEx 的日志文件。它从**游戏启动**就开始写，所以进程一起来我们就能跟上，
@@ -151,7 +147,7 @@ internal sealed class LogsPanel : UserControl
         if (_sessionDropdown.SelectedIndex != 0) _sessionDropdown.SelectedIndex = 0;
         else { _viewingLive = true; RenderAll(); }
 
-        AddLine($"{AppState.Settings.GameName} 正在运行，正在跟随它的日志文件。");
+        AddLine($"{AppState.CurrentDisplayName} 正在运行，正在跟随它的日志文件。");
         AddLine(_currentLogPath != null ? $"日志路径：{_currentLogPath}" : "没能推断出这个游戏的日志文件应该在哪里。");
         AddLine("");
         PollLog();
@@ -223,7 +219,7 @@ internal sealed class LogsPanel : UserControl
         _viewingLive = true;
         RenderAll();
         if (_logBox.TextLength == 0 && !IsGameRunning())
-            AppendStyledLine($"当前没有游戏在运行，所以没有内容可显示。启动 {AppState.Settings.GameName} 后，这个标签页就会实时跟随它的日志。");
+            AppendStyledLine($"当前没有游戏在运行，所以没有内容可显示。启动 {AppState.CurrentDisplayName} 后，这个标签页就会实时跟随它的日志。");
         UpdateCulpritBanner(_liveLines);
     }
 

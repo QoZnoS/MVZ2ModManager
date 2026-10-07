@@ -37,13 +37,14 @@ internal static class BugReportManager
         sb.AppendLine($"操作系统：{Environment.OSVersion}");
         sb.AppendLine($".NET 运行时：{Environment.Version}");
         sb.AppendLine($"64 位系统：{Environment.Is64BitOperatingSystem}");
-        sb.AppendLine($"游戏：{AppState.Settings.GameName}");
+        sb.AppendLine($"游戏：{AppState.Settings.GameName}（{AppState.CurrentDisplayName}）");
         sb.AppendLine($"游戏路径：{AppState.Settings.GamePath}");
 
         var gameDir = AppState.GameDir;
         if (gameDir != null)
         {
             sb.AppendLine($"BepInEx 是否存在：{BepInExManager.IsInstalled(gameDir)}");
+            sb.AppendLine($"BepInEx 状态    ：{BepInExManager.GetState(gameDir)}");
             sb.AppendLine($"模组总开关（winhttp.dll）：{BepInExManager.ModsEnabled(gameDir)}");
         }
 

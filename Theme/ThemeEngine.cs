@@ -207,9 +207,57 @@ internal static class ThemeEngine
         btn.ForeColor = Current.Text;
     }
 
+    /// <summary>
+    /// 给 <see cref="ContextMenuStrip"/> 上主题色。WinForms 的菜单默认走系统浅色配色，
+    /// 在深色主题里白得刺眼，所以连渲染器一起换掉。
+    ///
+    /// <para><b>要在条目都加完之后再调用</b> —— 它会给已存在的条目逐条上色。</para>
+    /// </summary>
+    public static void StyleMenu(ContextMenuStrip menu)
+    {
+        var t = Current;
+
+        menu.BackColor = t.Surface;
+        menu.ForeColor = t.Text;
+        menu.Renderer = new ToolStripProfessionalRenderer(new MenuColors(t)) { RoundedEdges = false };
+
+        foreach (ToolStripItem item in menu.Items) StyleMenuItem(item, t);
+    }
+
+    private static void StyleMenuItem(ToolStripItem item, ThemeColors t)
+    {
+        item.BackColor = t.Surface;
+        item.ForeColor = item.Enabled ? t.Text : t.SubText;
+
+        if (item is ToolStripMenuItem mi)
+            foreach (ToolStripItem child in mi.DropDownItems) StyleMenuItem(child, t);
+    }
+
+    /// <summary>菜单配色表：只覆盖真会露出来的那几项。</summary>
+    private sealed class MenuColors : ProfessionalColorTable
+    {
+        private readonly ThemeColors _t;
+        public MenuColors(ThemeColors t) => _t = t;
+
+        public override Color ToolStripDropDownBackground => _t.Surface;
+        public override Color ImageMarginGradientBegin => _t.Surface;
+        public override Color ImageMarginGradientMiddle => _t.Surface;
+        public override Color ImageMarginGradientEnd => _t.Surface;
+        public override Color MenuBorder => _t.Border;
+        public override Color MenuItemBorder => _t.Accent;
+        public override Color MenuItemSelected => _t.SurfaceAlt;
+        public override Color MenuItemSelectedGradientBegin => _t.SurfaceAlt;
+        public override Color MenuItemSelectedGradientEnd => _t.SurfaceAlt;
+        public override Color MenuItemPressedGradientBegin => _t.SurfaceAlt;
+        public override Color MenuItemPressedGradientEnd => _t.SurfaceAlt;
+        public override Color SeparatorDark => _t.Border;
+        public override Color SeparatorLight => _t.Surface;
+        public override Color CheckBackground => _t.Accent;
+        public override Color CheckSelectedBackground => _t.Accent;
+    }
+
     [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
     private static extern int SetWindowTheme(IntPtr hwnd, string? pszSubAppName, string? pszSubIdList);
-
     public static void StripVisualStyle(Control c)
     {
         if (c.IsHandleCreated) SetWindowTheme(c.Handle, "", "");
