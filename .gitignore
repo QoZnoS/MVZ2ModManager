@@ -1,0 +1,17 @@
+# 构建产物
+bin/
+obj/
+
+# 本机私有配置
+*.csproj.user
+*.user
+
+# 上游参考快照（本目录只作对照，不参与构建）
+_sevs-mod-manager-main/
+
+# 自检报告
+_selftest.txt
+
+# 打包输出
+dist/
+*.zip

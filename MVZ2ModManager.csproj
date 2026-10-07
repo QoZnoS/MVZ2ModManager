@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>MVZ2ModManager</RootNamespace>
+    <AssemblyName>MVZ2ModManager</AssemblyName>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>MVZ2 Mod Manager</Product>
+    <Description>《Minecraft vs Zombies 2》启动前模组管理器</Description>
+    <!-- 本工程不参与 MVZ2 mod 构建链（不声明 Mvz2Mod），
+         所以仓库根的 Directory.Build.props 对它完全惰性。 -->
+
+    <!-- 上游参考快照只作对照，绝不能参与编译：
+         SDK 风格工程的 **/*.cs 是递归通配的，下面这份快照里有一份同名类型，
+         不排除会出现 CS0579 / CS0101 之类的重复定义。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);_sevs-mod-manager-main\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="icon.ico" />
+    <EmbeddedResource Include="icon.png" />
+  </ItemGroup>
+
+  <!-- 增量开发用：dotnet build -p:CoreOnly=true 只编译 Core/，
+       不看 UI 与 Program 的错。正式构建不要带这个属性。 -->
+  <ItemGroup Condition="'$(CoreOnly)' == 'true'">
+    <Compile Remove="UI\**\*.cs" />
+    <Compile Remove="Theme\**\*.cs" />
+    <Compile Remove="Program.cs" />
+  </ItemGroup>
+
+</Project>

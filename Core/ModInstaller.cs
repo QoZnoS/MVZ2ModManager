@@ -1,0 +1,222 @@
+namespace MVZ2ModManager.Core;
+
+/// <summary>
+/// 模组的「装 / 卸 / 开关」。
+///
+/// <para><b>开关的实现方式</b>：BepInEx 的插件发现就是一句
+/// <c>Directory.GetFiles(plugins, "*.dll", AllDirectories)</c>，没有任何开关或白名单，
+/// 所以"禁用"只能是改名 —— <c>Foo.dll</c> ↔ <c>Foo.dll.disabled</c>。
+/// 这不是官方约定，但它只依赖那个 glob，行为稳定且可逆。</para>
+///
+/// <para>文件夹式模组（整个目录塞进 <c>plugins/</c>）同样处理：递归把所有
+/// <c>*.dll</c> 一起改名，避免出现"一半启用一半禁用"的怪状态。</para>
+///
+/// <para><b>卸载是软删除</b>：改名成 <c>*.delete</c> 而不是真删，误删可救。</para>
+/// </summary>
+internal static class ModInstaller
+{
+    private const string DisabledSuffix = ".disabled";
+    private const string DeleteSuffix = ".delete";
+
+    /// <summary>扫描已安装的模组（启用 + 禁用），按名字排序。</summary>
+    public static List<InstalledMod> GetInstalled()
+    {
+        var result = new List<InstalledMod>();
+
+        ScanDir(AppState.PluginsDir, result);
+        ScanDir(AppState.PatchersDir, result);
+
+        return result.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static void ScanDir(string? dir, List<InstalledMod> result)
+    {
+        result.AddRange(ScanDirItems(dir));
+    }
+
+    /// <summary>扫描单个目录（<c>plugins</c> 或 <c>patchers</c>）。</summary>
+    public static List<InstalledMod> ScanDirItems(string? dir)
+    {
+        var result = new List<InstalledMod>();
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return result;
+
+        ScanFlatDlls(dir, result);
+        ScanFolderMods(dir, result);
+        return result;
+    }
+
+    private static void ScanFlatDlls(string dir, List<InstalledMod> result)
+    {
+        foreach (var f in Directory.GetFiles(dir, "*.dll"))
+            result.Add(new InstalledMod
+            {
+                Name = Path.GetFileNameWithoutExtension(f),
+                FilePath = f,
+                Enabled = true,
+                SizeBytes = SafeLength(f),
+            });
+
+        foreach (var f in Directory.GetFiles(dir, "*.dll" + DisabledSuffix))
+        {
+            string name = Path.GetFileNameWithoutExtension(f);
+            if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                name = name[..^4];
+            result.Add(new InstalledMod
+            {
+                Name = name,
+                FilePath = f,
+                Enabled = false,
+                SizeBytes = SafeLength(f),
+            });
+        }
+    }
+
+    private static void ScanFolderMods(string dir, List<InstalledMod> result)
+    {
+        foreach (var sub in Directory.GetDirectories(dir))
+        {
+            string leaf = Path.GetFileName(sub);
+
+            // 软删除的目录
+            if (leaf.EndsWith(DeleteSuffix, StringComparison.OrdinalIgnoreCase)) continue;
+
+            int active = SafeCount(sub, "*.dll");
+            int disabled = SafeCount(sub, "*.dll" + DisabledSuffix);
+            if (active + disabled == 0) continue;   // 不是模组（可能只是别的工具的杂物）
+
+            result.Add(new InstalledMod
+            {
+                Name = leaf,
+                FilePath = sub,
+                Enabled = active > 0,
+                IsFolder = true,
+                SizeBytes = SafeTreeLength(sub),
+            });
+        }
+    }
+
+    // ------------------------------------------------------------- 装 / 卸
+
+    /// <summary>把本地 dll 拷进 <c>plugins/</c>（拖拽安装走这里）。</summary>
+    public static void InstallLocal(string sourceDllPath)
+    {
+        string? modsDir = AppState.ModsInstallDir ?? throw new InvalidOperationException("还没有选择游戏目录。");
+        Directory.CreateDirectory(modsDir);
+
+        string name = Path.GetFileNameWithoutExtension(sourceDllPath);
+        string dest = Path.Combine(modsDir, name + ".dll");
+
+        // 同名但处于禁用状态时，先清掉禁用副本，避免出现两份。
+        string disabled = dest + DisabledSuffix;
+        if (File.Exists(disabled)) File.Delete(disabled);
+
+        File.Copy(sourceDllPath, dest, overwrite: true);
+    }
+
+    /// <summary>
+    /// 软删除：改名成 <c>*.delete</c>（文件夹式则整个目录改名）。
+    /// 同时清掉这套模组的版本记录。
+    /// </summary>
+    public static void Uninstall(string modName)
+    {
+        string? modsDir = AppState.ModsInstallDir;
+        if (modsDir == null) return;
+
+        string folderPath = Path.Combine(modsDir, modName);
+        if (Directory.Exists(folderPath))
+        {
+            string folderTrash = folderPath + DeleteSuffix;
+            if (Directory.Exists(folderTrash)) Directory.Delete(folderTrash, recursive: true);
+            Directory.Move(folderPath, folderTrash);
+            return;
+        }
+
+        string dll = Path.Combine(modsDir, modName + ".dll");
+        string disabled = dll + DisabledSuffix;
+        string target = File.Exists(dll) ? dll : File.Exists(disabled) ? disabled : "";
+        if (target.Length == 0) return;
+
+        string trash = target + DeleteSuffix;
+        if (File.Exists(trash)) File.Delete(trash);
+        File.Move(target, trash);
+    }
+
+    // ---------------------------------------------------------------- 开关
+
+    /// <summary>启用（<c>.dll.disabled</c> → <c>.dll</c>）。</summary>
+    public static void Enable(string modName) => SetEnabled(modName, true);
+
+    /// <summary>禁用（<c>.dll</c> → <c>.dll.disabled</c>）。</summary>
+    public static void Disable(string modName) => SetEnabled(modName, false);
+
+    /// <summary>
+    /// 批量开关。任一项失败不影响其它项，返回失败的模组名。
+    /// 游戏运行时 dll 被锁 → <see cref="IOException"/>，这里收集起来由调用方提示。
+    /// </summary>
+    public static List<string> SetEnabledMany(IEnumerable<string> modNames, bool enabled)
+    {
+        var failed = new List<string>();
+        foreach (var name in modNames)
+        {
+            try { SetEnabled(name, enabled); }
+            catch { failed.Add(name); }
+        }
+        return failed;
+    }
+
+    private static void SetEnabled(string modName, bool enabled)
+    {
+        string? modsDir = AppState.ModsInstallDir;
+        if (modsDir == null) return;
+
+        string folderPath = Path.Combine(modsDir, modName);
+        if (Directory.Exists(folderPath)) { SetFolderEnabled(folderPath, enabled); return; }
+
+        string dll = Path.Combine(modsDir, modName + ".dll");
+        string disabled = dll + DisabledSuffix;
+
+        if (enabled && File.Exists(disabled))
+        {
+            if (File.Exists(dll)) File.Delete(dll);
+            File.Move(disabled, dll);
+        }
+        else if (!enabled && File.Exists(dll))
+        {
+            if (File.Exists(disabled)) File.Delete(disabled);
+            File.Move(dll, disabled);
+        }
+    }
+
+    private static void SetFolderEnabled(string folderPath, bool enabled)
+    {
+        string pattern = enabled ? "*.dll" + DisabledSuffix : "*.dll";
+
+        // 先快照，避免边遍历边改名踩到自己的结果。
+        var files = Directory.GetFiles(folderPath, pattern, SearchOption.AllDirectories);
+        foreach (var f in files)
+        {
+            string target = enabled ? f[..^DisabledSuffix.Length] : f + DisabledSuffix;
+            if (File.Exists(target)) File.Delete(target);
+            File.Move(f, target);
+        }
+    }
+
+    // ------------------------------------------------------------ 小工具
+
+    private static long SafeLength(string path)
+    {
+        try { return new FileInfo(path).Length; } catch { return 0; }
+    }
+
+    private static int SafeCount(string dir, string pattern)
+    {
+        try { return Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories).Count(); }
+        catch { return 0; }
+    }
+
+    private static long SafeTreeLength(string dir)
+    {
+        try { return Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Sum(SafeLength); }
+        catch { return 0; }
+    }
+}
