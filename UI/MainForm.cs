@@ -273,6 +273,8 @@ internal sealed class MainForm : Form
 
     internal InstalledPanel InstalledPanelControl => _installedPanel;
 
+    internal ConfigPanel ConfigPanelControl => _configPanel;
+
     /// <summary>标签页名字。自检直接用它，避免自检里另抄一份、抄错了还当成通过。</summary>
     internal static string[] TabLabels => NavLabels;
 

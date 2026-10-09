@@ -25,6 +25,19 @@ internal struct ThemeColors
                 Math.Clamp(SurfaceAlt.B + amt, 0, 255));
         }
     }
+
+    /// <summary>
+    /// 校验不通过时的文字色。深色背景上必须提亮、浅色背景上必须压暗，
+    /// 否则红字会糊在背景里 —— 那跟没有提示没区别。
+    /// </summary>
+    public Color Danger
+    {
+        get
+        {
+            bool dark = Background.R + Background.G + Background.B < 384;
+            return dark ? Color.FromArgb(240, 108, 108) : Color.FromArgb(178, 40, 40);
+        }
+    }
 }
 
 internal static class ThemeEngine

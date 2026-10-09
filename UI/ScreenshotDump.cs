@@ -43,15 +43,14 @@ internal static class ScreenshotDump
 
             Settle(1800);   // 存档扫描在后台线程上，第一张多等一会儿
 
-            foreach (var (tab, file) in Tabs)
+            // 拍一页 + 落一份控件树 + 内容超出可视区时再拍一张滚到底的。
+            // 控件树是必需的：截图只能看"画出来什么样"，看不出"某个分组到底有没有进版面"。
+            void CaptureTab(string title, string file, string label, Control treeRoot)
             {
-                form.SwitchToTab(tab);
-                Settle(500);
-                log.Add(Capture(form, Path.Combine(outDir, file + ".png"), file));
+                log.Add(Capture(form, Path.Combine(outDir, file + ".png"), label));
 
-                // 控件树：截图只能看"画出来什么样"，看不出"某个分组到底有没有进版面"。
-                var tree = new List<string> { $"标签页 {tab} 的可见控件树（类型 [左,上 宽x高] 文本）", "" };
-                foreach (Control page in form.Controls) DumpTree(page, tree);
+                var tree = new List<string> { $"{title} 的可见控件树（类型 [左,上 宽x高] 文本）", "" };
+                DumpTree(treeRoot, tree);
                 File.WriteAllLines(Path.Combine(outDir, $"controls-{file}.txt"), tree);
 
                 // 内容比可视区高的页再拍一张滚到底的。设置页就是这种：不滚的话
@@ -61,9 +60,27 @@ internal static class ScreenshotDump
                 {
                     Settle(400);
                     log.Add($"  {scrolled.Info}");
-                    log.Add(Capture(form, Path.Combine(outDir, file + "-bottom.png"), file + "-bottom"));
+                    log.Add(Capture(form, Path.Combine(outDir, file + "-bottom.png"), label + "-bottom"));
                     scrolled.Restore();
                     Settle(200);
+                }
+            }
+
+            foreach (var (tab, file) in Tabs)
+            {
+                form.SwitchToTab(tab);
+                Settle(500);
+                CaptureTab($"标签页 {tab}", file, file, form);
+
+                // 配置页默认拍的是列表里第一份文件，它未必带数值项 ——
+                // 「端口 1~65535 到底给滑条还是输入框」这类改动，只有带 range 的文件才看得见。
+                if (tab == "配置" && FindFileWithNumbers() is { } numeric
+                    && form.ConfigPanelControl.SelectFile(numeric))
+                {
+                    Settle(400);
+                    string fn = Path.GetFileName(numeric);
+                    log.Add($"  数值项所在的配置：{fn}");
+                    CaptureTab($"配置文件 {fn}", "04-config-numbers", "04-config-numbers", form.ConfigPanelControl);
                 }
             }
 
@@ -90,6 +107,24 @@ internal static class ScreenshotDump
             catch { /* 连日志都写不进去就没辙了 */ }
             return 1;
         }
+    }
+
+    /// <summary>
+    /// 挑一份"带数值范围项"的配置文件（端口、日志行数、贴图倍率都在这种文件里）。
+    /// 都没有就返回 null —— 没装模组的新机器上就是这样。
+    /// </summary>
+    private static string? FindFileWithNumbers()
+    {
+        foreach (var (_, path) in BepInExConfig.ListConfigFiles())
+        {
+            try
+            {
+                if (BepInExConfig.Parse(path).Sections.SelectMany(s => s.Entries).Any(e => e.Range != null))
+                    return path;
+            }
+            catch { /* 解析不了就跳过，截图工具不该因此挂掉 */ }
+        }
+        return null;
     }
 
     /// <summary>
